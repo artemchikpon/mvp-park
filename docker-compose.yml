@@ -1,0 +1,41 @@
+version: "3.9"
+
+services:
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: face
+      POSTGRES_PASSWORD: face
+      POSTGRES_DB: face_db
+    ports:
+      - "5432:5432"
+
+  producer:
+    build: .
+    command: python producer/camera.py
+    depends_on:
+      - redis
+
+  worker:
+    build: .
+    command: python worker/worker.py
+    depends_on:
+      - redis
+      - postgres
+    deploy:
+      replicas: 2
+
+
+  migrator:
+    build: .
+    environment:
+      DATABASE_URL: postgresql://face:face@postgres:5432/face_db
+    command: alembic upgrade head
+    depends_on:
+      - postgres

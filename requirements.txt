@@ -1,0 +1,10 @@
+redis
+opencv-python
+numpy
+scikit-learn
+insightface
+onnxruntime
+
+SQLAlchemy
+psycopg2-binary
+alembic
