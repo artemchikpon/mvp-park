@@ -5,21 +5,15 @@ from sqlalchemy import engine_from_config, pool
 from alembic import context
 
 from db.database import Base
-from db import models  # важно, чтобы модели загрузились
+from db import models
 
 config = context.config
 
-# -----------------------
-# LOGGING
-# -----------------------
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
 
-# -----------------------
-# OVERRIDE DATABASE URL
-# -----------------------
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://face:face@localhost:5432/face_db"

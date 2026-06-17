@@ -1,0 +1,4 @@
+redis
+opencv-python-headless
+SQLAlchemy
+psycopg2-binary
