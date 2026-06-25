@@ -6,3 +6,4 @@ insightface
 onnxruntime
 SQLAlchemy
 psycopg2-binary
+httpx

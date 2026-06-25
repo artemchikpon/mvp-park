@@ -88,6 +88,25 @@ class CrossingEvent(Base):
     )
 
 
+class Employee(Base):
+    """
+    Сотрудники — их вектора лиц игнорируются при анализе посетителей.
+
+    external_id  — id из внешней HR-системы (api/v1/employees)
+    first_name   — имя сотрудника
+    file_id      — id файла фото в HR-системе
+    embedding    — усреднённый вектор лица (float32, 512-dim = 2048 bytes)
+    """
+    __tablename__ = "employees"
+
+    id = Column(Integer, primary_key=True)
+    external_id = Column(Integer, nullable=True, unique=True)   # id в HR
+    first_name = Column(String(128), nullable=False)
+    file_id = Column(Integer, nullable=True)
+    embedding = Column(LargeBinary, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class ParkSettings(Base):
     """
     Единственная строка конфигурации парка (id=1):

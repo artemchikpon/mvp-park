@@ -15,7 +15,7 @@ from datetime import datetime
 from sklearn.metrics.pairwise import cosine_similarity
 
 from db.database import SessionLocal
-from db.models import Person
+from db.models import Person, Employee
 
 SIMILARITY = 0.65
 EMB_DTYPE = np.float32
@@ -31,13 +31,33 @@ def _from_bytes(b: bytes) -> np.ndarray:
 
 class FaceStoragePG:
 
+    def is_employee(self, emb: np.ndarray, session) -> bool:
+        """
+        Возвращает True если вектор совпадает с кем-либо из таблицы employees.
+        Используется перед identify() — если сотрудник, лицо не считается.
+        """
+        employees = session.query(Employee).all()
+        if not employees:
+            return False
+
+        for emp in employees:
+            stored = _from_bytes(emp.embedding)
+            score = cosine_similarity([emb], [stored])[0][0]
+            if score >= SIMILARITY:
+                return True
+        return False
+
     def identify(self, emb: np.ndarray, face) -> dict:
         """
         Возвращает dict:
           id, new (bool), age, gender
+        Или None если лицо принадлежит сотруднику (нужно игнорировать).
         """
         session = SessionLocal()
         try:
+            # ── Проверяем — не сотрудник ли это ──────────────────────────
+            if self.is_employee(emb, session):
+                return None   # сигнал воркеру: пропустить это лицо
             persons = session.query(Person).all()
 
             best_id = None

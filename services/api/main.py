@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from api.routers import cameras, stats, persons, settings
+from api.routers import cameras, stats, persons, settings, employees
 
 app = FastAPI(
     title="Park Tracker API",
@@ -11,6 +11,7 @@ app.include_router(cameras.router)
 app.include_router(stats.router)
 app.include_router(persons.router)
 app.include_router(settings.router)
+app.include_router(employees.router)
 
 
 @app.get("/health", tags=["system"])

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from face_engine import extract_faces
 from face_storage_pg import FaceStoragePG
+from employee_sync import sync_employees
 from db.stats_service import log_crossing
 from db.database import wait_for_db, wait_for_redis, SessionLocal
 from db.models import Camera
@@ -92,6 +93,11 @@ def _camera_reload_loop():
 _reload_cameras()  # первичная загрузка перед стартом основного цикла
 threading.Thread(target=_camera_reload_loop, daemon=True).start()
 
+# ── Синхронизация сотрудников при старте ────────────────────────────────────
+log.info("Синхронизация сотрудников из HR-системы...")
+sync_employees()
+log.info("Синхронизация завершена. Воркер запускается.")
+
 
 def _already_counted_recently(camera_id: int, person_id: int) -> bool:
     """True, если этого человека на этой камере уже считали в течение
@@ -153,6 +159,13 @@ while True:
                 continue
 
             res = storage.identify(face.embedding, face)
+
+            # None означает что лицо опознано как сотрудник — игнорируем
+            if res is None:
+                log.debug("Лицо сотрудника — пропускаем")
+                skipped_cooldown += 1
+                continue
+
             person_id = res["id"]
 
             if _already_counted_recently(camera_id, person_id):
