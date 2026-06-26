@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, Integer, String, Date, DateTime, LargeBinary, Boolean, Text,
-    UniqueConstraint, ForeignKey, Index, CheckConstraint,
+    ForeignKey, Index, CheckConstraint,
 )
 from sqlalchemy.orm import relationship
 from db.database import Base
@@ -8,21 +8,7 @@ from datetime import datetime
 
 
 class Camera(Base):
-    """
-    Камеры — URL хранится здесь, не в .env.
 
-    direction — направление, которое ВСЕГДА фиксирует эта камера:
-        'in'  — камера стоит на входной группе (Вход)
-        'out' — камера стоит на выходной группе (Выход)
-    Трекинг траектории/пересечения линии не используется (MVP):
-    направление задаётся настройкой камеры один раз при установке.
-
-    gate — название точки/группы Вход+Выход, к которой относится камера,
-    например "Центральный" или "Второй (МОРЕ)". Используется для
-    группировки и фильтрации статистики по конкретному входу/выходу,
-    при этом данные со всех камер агрегируются в общий пул для расчёта
-    общей заполненности парка (см. ТЗ, раздел "Синхронизация камер").
-    """
     __tablename__ = "cameras"
 
     id = Column(Integer, primary_key=True)
@@ -51,21 +37,7 @@ class Person(Base):
 
 
 class CrossingEvent(Base):
-    """
-    Единичное пересечение Вход/Выход — основной "сырой" журнал событий.
 
-    Каждое попадание лица в кадр камеры (после анти-дублирующего cooldown
-    на стороне воркера) пишется сюда. Направление и привязка к
-    конкретной точке (gate) берутся от камеры на момент события и
-    дублируются в строку события, чтобы история не "переписывалась"
-    при последующем переназначении камеры.
-
-    На основе этой таблицы считаются все метрики ТЗ:
-      - Inflow / Outflow по часам/дням
-      - Live Occupancy = sum(in) - sum(out) с начала суток
-      - Демография (только по direction='in')
-      - Уникальные гости за период (DISTINCT person_id)
-    """
     __tablename__ = "crossing_events"
 
     id = Column(Integer, primary_key=True)
@@ -89,14 +61,7 @@ class CrossingEvent(Base):
 
 
 class Employee(Base):
-    """
-    Сотрудники — их вектора лиц игнорируются при анализе посетителей.
 
-    external_id  — id из внешней HR-системы (api/v1/employees)
-    first_name   — имя сотрудника
-    file_id      — id файла фото в HR-системе
-    embedding    — усреднённый вектор лица (float32, 512-dim = 2048 bytes)
-    """
     __tablename__ = "employees"
 
     id = Column(Integer, primary_key=True)
@@ -108,11 +73,7 @@ class Employee(Base):
 
 
 class ParkSettings(Base):
-    """
-    Единственная строка конфигурации парка (id=1):
-    вместимость и порог предупреждения для индикатора Live Occupancy,
-    плюс часовой пояс для расчёта границ суток (сброс счётчика в 00:00).
-    """
+
     __tablename__ = "park_settings"
 
     id = Column(Integer, primary_key=True)

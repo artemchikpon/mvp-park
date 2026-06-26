@@ -62,7 +62,6 @@ def _emb_to_bytes(vec: np.ndarray) -> bytes:
 
 
 def _fetch_frame_from_file(file_id: int) -> np.ndarray:
-    """Скачивает фото по file_id из HR API и возвращает BGR frame."""
     url = f"{HR_BASE}/api/v1/files/{file_id}/view"
     try:
         resp = httpx.get(url, verify=SSL_VERIFY, timeout=15)
@@ -108,9 +107,6 @@ def _extract_embedding(frame: np.ndarray) -> np.ndarray:
 
     return face.embedding
 
-
-# ── Роуты ─────────────────────────────────────────────────────────────────────
-
 @router.get("/", response_model=list[EmployeeOut], summary="Список сотрудников")
 def list_employees(db: Session = Depends(get_db)):
     """Возвращает всех сотрудников в БД (без векторов)."""
@@ -119,13 +115,7 @@ def list_employees(db: Session = Depends(get_db)):
 
 @router.post("/sync", response_model=SyncResult, summary="Синхронизировать всех сотрудников из HR API")
 def sync_employees_route():
-    """
-    Запускает полную синхронизацию: загружает список сотрудников из HR API,
-    скачивает фото каждого и сохраняет/обновляет векторы в БД.
 
-    Сотрудники с file=0 (нет фото) пропускаются.
-    """
-    # Импортируем здесь чтобы не тянуть face_engine при импорте модуля
     try:
         from employee_sync import sync_employees
     except ImportError:
@@ -140,12 +130,7 @@ def sync_employees_route():
 
 @router.post("/add", response_model=EmployeeOut, summary="Добавить сотрудника вручную")
 def add_employee(body: AddEmployeeRequest, db: Session = Depends(get_db)):
-    """
-    Добавляет одного сотрудника по firstname и file_id.
 
-    Скачивает фото, извлекает вектор лица и сохраняет в БД.
-    Если сотрудник с таким external_id уже есть — обновляет его вектор.
-    """
     # Проверяем нет ли уже такого external_id
     if body.external_id is not None:
         existing = db.query(Employee).filter(
@@ -183,10 +168,7 @@ def add_employee(body: AddEmployeeRequest, db: Session = Depends(get_db)):
     summary="Удалить сотрудника и его векторы из БД",
 )
 def delete_employee(employee_id: int, db: Session = Depends(get_db)):
-    """
-    Удаляет сотрудника по его id в нашей БД (не external_id из HR).
-    После удаления этот человек снова будет считаться как посетитель.
-    """
+
     emp = db.query(Employee).filter(Employee.id == employee_id).first()
     if not emp:
         raise HTTPException(
