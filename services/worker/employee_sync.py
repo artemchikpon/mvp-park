@@ -28,24 +28,65 @@ from face_engine import extract_faces
 
 log = logging.getLogger("employee_sync")
 
-HR_BASE = os.environ.get("HR_API_BASE", "https://192.168.0.146:4050")
+HR_BASE = os.environ.get("HR_API_BASE", "https://192.168.0.146:4050").rstrip("/")
 EMPLOYEES_URL = f"{HR_BASE}/api/v1/employees"
 FILE_URL_TPL = f"{HR_BASE}/api/v1/files/{{file_id}}/view"
+
+# Сколько сотрудников запрашивать за одну страницу (HR API отдаёт постранично)
+EMPLOYEES_PAGE_LIMIT = int(os.environ.get("HR_EMPLOYEES_PAGE_LIMIT", "100"))
 
 # Отключаем проверку SSL для self-signed серта (локальная сеть)
 SSL_VERIFY = os.environ.get("HR_SSL_VERIFY", "false").lower() != "false"
 
 
 def _fetch_employees() -> list[dict]:
-    """Возвращает список сотрудников из HR API."""
-    try:
-        resp = httpx.get(EMPLOYEES_URL, verify=SSL_VERIFY, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        return data.get("data", {}).get("employees", [])
-    except Exception as e:
-        log.error(f"[employee_sync] Не удалось получить список сотрудников: {e}")
-        return []
+    """
+    Возвращает список ВСЕХ сотрудников из HR API, проходя по всем страницам.
+
+    Формат ответа HR API:
+    {
+      "statusCode": 200,
+      "data": {
+        "employees": [...],
+        "pagination": {"total": 11, "page": 1, "limit": 100, "totalPages": 1}
+      }
+    }
+    """
+    all_employees: list[dict] = []
+    page = 1
+
+    while True:
+        try:
+            resp = httpx.get(
+                EMPLOYEES_URL,
+                params={"page": page, "limit": EMPLOYEES_PAGE_LIMIT},
+                verify=SSL_VERIFY,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+        except Exception as e:
+            log.error(f"[employee_sync] Не удалось получить страницу {page} списка сотрудников: {e}")
+            break
+
+        data = payload.get("data", {})
+        employees = data.get("employees", [])
+        all_employees.extend(employees)
+
+        pagination = data.get("pagination", {})
+        total_pages = pagination.get("totalPages", 1)
+
+        log.info(
+            f"[employee_sync] Страница {page}/{total_pages}: получено {len(employees)} сотрудников "
+            f"(всего собрано: {len(all_employees)})"
+        )
+
+        if not employees or page >= total_pages:
+            break
+
+        page += 1
+
+    return all_employees
 
 
 def _fetch_photo_as_frame(file_id: int) -> np.ndarray | None:

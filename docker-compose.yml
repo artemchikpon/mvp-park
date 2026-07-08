@@ -49,12 +49,15 @@ services:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql://face:face@postgres:5432/face_db
-      HR_API_BASE: "https://host.docker.internal:4050"
-      HR_SSL_VERIFY: "false"
+      REDIS_HOST: redis
+      HR_API_BASE: "https://central-park.rzbtech.uz"
+      HR_SSL_VERIFY: "true"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
       migrator:
         condition: service_completed_successfully
@@ -86,8 +89,8 @@ services:
       DATABASE_URL: postgresql://face:face@postgres:5432/face_db
       REDIS_HOST: redis
       CROSSING_COOLDOWN_SECONDS: "60"
-      HR_API_BASE: "https://host.docker.internal:4050"
-      HR_SSL_VERIFY: "false"
+      HR_API_BASE: "https://central-park.rzbtech.uz"
+      HR_SSL_VERIFY: "true"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

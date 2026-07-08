@@ -1,8 +1,11 @@
+import json
 import logging
 import os
+import uuid
 import numpy as np
 import httpx
 import cv2
+import redis
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -17,10 +20,27 @@ log = logging.getLogger("employees_router")
 
 router = APIRouter(prefix="/employees", tags=["employees"])
 
-HR_BASE = os.environ.get("HR_API_BASE", "https://192.168.0.146:4050")
+HR_BASE = os.environ.get("HR_API_BASE", "https://central-park.rzbtech.uz").rstrip("/")
 SSL_VERIFY = os.environ.get("HR_SSL_VERIFY", "false").lower() != "false"
 SIMILARITY = 0.65
 EMB_DTYPE = np.float32
+
+# ── Синхронизация сотрудников выполняется в worker-сервисе (там есть
+# ML-зависимости face_engine/insightface). api-сервис их не тащит, чтобы не
+# раздувать образ, а вместо этого кладёт задачу в Redis-очередь и ждёт
+# результат от воркера. ────────────────────────────────────────────────────
+REDIS_HOST = os.environ.get("REDIS_HOST", "redis")
+REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
+EMPLOYEE_SYNC_JOBS_KEY = "employee_sync_jobs"
+EMPLOYEE_SYNC_TIMEOUT = int(os.environ.get("EMPLOYEE_SYNC_TIMEOUT", "120"))
+
+redis_client = redis.Redis(
+    host=REDIS_HOST,
+    port=REDIS_PORT,
+    decode_responses=True,
+    socket_timeout=EMPLOYEE_SYNC_TIMEOUT + 5,
+    socket_connect_timeout=5,
+)
 
 
 
@@ -115,17 +135,48 @@ def list_employees(db: Session = Depends(get_db)):
 
 @router.post("/sync", response_model=SyncResult, summary="Синхронизировать всех сотрудников из HR API")
 def sync_employees_route():
+    """
+    В api-сервисе нет face_engine/insightface (они тяжёлые и нужны только
+    воркеру), поэтому синхронизация физически не может выполняться здесь.
+    Вместо этого мы кладём задачу в Redis-очередь ("employee_sync_jobs"),
+    один из worker-реплик её забирает, выполняет sync_employees() и кладёт
+    результат обратно в Redis по ключу задания — а мы его ждём (blpop).
+    """
+    job_id = str(uuid.uuid4())
+    result_key = f"employee_sync_result:{job_id}"
 
     try:
-        from employee_sync import sync_employees
-    except ImportError:
+        redis_client.rpush(EMPLOYEE_SYNC_JOBS_KEY, job_id)
+    except redis.exceptions.RedisError as e:
         raise HTTPException(
             status_code=503,
-            detail="employee_sync недоступен. Этот эндпоинт работает только в worker-сервисе."
+            detail=f"Не удалось поставить задачу синхронизации в очередь (Redis недоступен): {e}"
         )
 
-    result = sync_employees()
-    return result
+    try:
+        response = redis_client.blpop(result_key, timeout=EMPLOYEE_SYNC_TIMEOUT)
+    except redis.exceptions.RedisError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Ошибка ожидания результата синхронизации (Redis недоступен): {e}"
+        )
+
+    if response is None:
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                f"Worker не ответил за {EMPLOYEE_SYNC_TIMEOUT} сек. "
+                "Проверьте что worker-сервис запущен и подключён к Redis."
+            )
+        )
+
+    _, payload = response
+    data = json.loads(payload)
+
+    if "error" in data:
+        raise HTTPException(status_code=500, detail=f"Ошибка синхронизации в worker: {data['error']}")
+
+    return data
 
 
 @router.post("/add", response_model=EmployeeOut, summary="Добавить сотрудника вручную")

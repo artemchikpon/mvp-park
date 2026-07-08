@@ -1,3 +1,4 @@
+import json
 import os
 import redis
 import cv2
@@ -97,6 +98,48 @@ threading.Thread(target=_camera_reload_loop, daemon=True).start()
 log.info("Синхронизация сотрудников из HR-системы...")
 sync_employees()
 log.info("Синхронизация завершена. Воркер запускается.")
+
+
+# ── Обработка запросов POST /employees/sync от api-сервиса ─────────────────
+# api не тащит face_engine/insightface, поэтому кладёт задачу в очередь
+# EMPLOYEE_SYNC_JOBS_KEY, а результат ждёт по ключу employee_sync_result:{job_id}.
+# Запущено репликами worker'а (replicas: 2) — каждую задачу заберёт ровно
+# одна реплика (BLPOP атомарен), дублирования не будет.
+EMPLOYEE_SYNC_JOBS_KEY = "employee_sync_jobs"
+EMPLOYEE_SYNC_RESULT_TTL = 300  # сек, чтобы неполученные результаты не копились в Redis
+
+
+def _employee_sync_job_listener():
+    while True:
+        try:
+            job = r.blpop(EMPLOYEE_SYNC_JOBS_KEY, timeout=5)
+        except redis.exceptions.ConnectionError as e:
+            log.warning(f"[employee_sync_listener] Redis connection lost: {e}, retrying in 2s...")
+            time.sleep(2)
+            continue
+
+        if job is None:
+            continue
+
+        _, job_id_raw = job
+        job_id = job_id_raw.decode()
+        log.info(f"[employee_sync_listener] Получена задача синхронизации job_id={job_id}")
+
+        try:
+            result = sync_employees()
+        except Exception as e:
+            log.error(f"[employee_sync_listener] Ошибка синхронизации job_id={job_id}: {e}")
+            result = {"error": str(e)}
+
+        result_key = f"employee_sync_result:{job_id}"
+        try:
+            r.rpush(result_key, json.dumps(result))
+            r.expire(result_key, EMPLOYEE_SYNC_RESULT_TTL)
+        except redis.exceptions.ConnectionError as e:
+            log.error(f"[employee_sync_listener] Не удалось записать результат job_id={job_id}: {e}")
+
+
+threading.Thread(target=_employee_sync_job_listener, daemon=True).start()
 
 
 def _already_counted_recently(camera_id: int, person_id: int) -> bool:
