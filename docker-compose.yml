@@ -2,12 +2,11 @@ version: "3.9"
 
 services:
 
-
   redis:
     image: redis:7
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -21,13 +20,13 @@ services:
       POSTGRES_DB: face_db
     volumes:
       - pgdata:/var/lib/postgresql/data
+
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U face -d face_db"]
+      test: [ "CMD-SHELL", "pg_isready -U face -d face_db" ]
       interval: 5s
       timeout: 3s
       retries: 15
       start_period: 10s
-
 
   migrator:
     build:
@@ -40,7 +39,6 @@ services:
         condition: service_healthy
     restart: "no"
 
-
   api:
     build:
       context: .
@@ -52,6 +50,13 @@ services:
       REDIS_HOST: redis
       HR_API_BASE: "https://central-park.rzbtech.uz"
       HR_SSL_VERIFY: "true"
+      ENABLE_DOCS: "true"
+      # CORS_ORIGINS можно передать через .env, например:
+      # https://dashboard.example.com,https://admin.example.com
+      CORS_ORIGINS: "${CORS_ORIGINS:-*}"
+      # ВАЖНО: заменить на реальные секреты перед продом (например, через
+      # .env файл / docker secret, не хранить в git).
+      API_KEYS: "${API_KEYS:?Задайте API_KEYS в .env — см. auth.py}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -62,7 +67,6 @@ services:
       migrator:
         condition: service_completed_successfully
     restart: unless-stopped
-
 
   producer:
     build:
@@ -79,7 +83,6 @@ services:
       migrator:
         condition: service_completed_successfully
     restart: unless-stopped
-
 
   worker:
     build:

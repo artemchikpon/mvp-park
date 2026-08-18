@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from sqlalchemy.exc import IntegrityError
+from typing import List, Optional, Literal
 
 from db.database import SessionLocal
 from db.models import Camera
@@ -19,7 +20,7 @@ def get_db():
 
 @router.get("/", response_model=List[CameraOut], summary="Список всех камер")
 def list_cameras(
-    direction: Optional[str] = None,
+    direction: Optional[Literal["in", "out"]] = None,
     gate: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
@@ -69,7 +70,7 @@ def update_camera(camera_id: int, body: CameraUpdate, db: Session = Depends(get_
     cam = db.get(Camera, camera_id)
     if not cam:
         raise HTTPException(status_code=404, detail="Камера не найдена")
-    for field, value in body.model_dump(exclude_none=True).items():
+    for field, value in body.model_dump(exclude_unset=True).items():
         setattr(cam, field, value)
     db.commit()
     db.refresh(cam)
@@ -82,7 +83,14 @@ def delete_camera(camera_id: int, db: Session = Depends(get_db)):
     if not cam:
         raise HTTPException(status_code=404, detail="Камера не найдена")
     db.delete(cam)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Нельзя удалить камеру: по ней уже есть события. Сначала деактивируйте камеру.",
+        )
 
 
 @router.post("/{camera_id}/toggle", response_model=CameraOut, summary="Включить / выключить камеру")

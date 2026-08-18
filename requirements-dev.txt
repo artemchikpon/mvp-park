@@ -1,0 +1,24 @@
+# Зависимости для запуска тестов (pytest tests/).
+# Прод-образы (Dockerfile) их не используют — ставятся отдельно, локально
+# или в CI: pip install -r requirements-dev.txt
+#
+# Тесты используют sqlite (входит в stdlib) вместо Postgres и fakeredis
+# вместо реального Redis — поднимать docker-compose для запуска тестов
+# не нужно. face_engine/insightface подменяется на лёгкую заглушку в
+# tests/conftest.py, поэтому insightface и onnxruntime (тяжёлые ML-пакеты
+# из services/worker/requirements.txt) устанавливать НЕ нужно — намеренно
+# не тянем их через -r.
+
+fastapi
+uvicorn[standard]
+pydantic>=2.0
+SQLAlchemy
+httpx
+redis
+numpy
+scikit-learn
+opencv-python-headless
+Pillow
+
+pytest>=8.0
+fakeredis>=2.20

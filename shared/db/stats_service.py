@@ -16,6 +16,7 @@ from datetime import datetime, date, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from db.database import SessionLocal
 from db.models import CrossingEvent, ParkSettings
@@ -46,23 +47,57 @@ AGE_GROUP_KEYS = ("kids", "teens", "adults", "elderly")
 
 def get_settings(db: Session) -> ParkSettings:
     s = db.get(ParkSettings, 1)
-    if not s:
-        s = ParkSettings(id=1, capacity=5000, warning_threshold=4500, timezone="UTC")
-        db.add(s)
+    if s:
+        return s
+
+    s = ParkSettings(id=1, capacity=5000, warning_threshold=4500, timezone="UTC")
+    db.add(s)
+    try:
         db.commit()
         db.refresh(s)
-    return s
+        return s
+    except IntegrityError:
+        # Другая реплика успела создать singleton row одновременно.
+        db.rollback()
+        existing = db.get(ParkSettings, 1)
+        if existing is None:
+            raise
+        return existing
 
 
 def update_settings(db: Session, **fields) -> ParkSettings:
     s = get_settings(db)
+    new_capacity = fields.get("capacity") if fields.get("capacity") is not None else s.capacity
+    new_threshold = fields.get("warning_threshold") if fields.get("warning_threshold") is not None else s.warning_threshold
+    new_timezone = fields.get("timezone") if fields.get("timezone") is not None else s.timezone
+
+    if new_capacity <= 0:
+        raise ValueError("capacity должен быть положительным")
+    if new_threshold <= 0:
+        raise ValueError("warning_threshold должен быть положительным")
+    if new_threshold > new_capacity:
+        raise ValueError("warning_threshold не может быть больше capacity")
+    try:
+        ZoneInfo(new_timezone)
+    except Exception as exc:
+        raise ValueError(f"Невалидная timezone: {new_timezone}") from exc
+
     for k, v in fields.items():
         if v is not None:
             setattr(s, k, v)
     s.updated_at = datetime.utcnow()
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise
     db.refresh(s)
     return s
+
+
+def current_park_date(db: Session) -> date:
+    tz = _tz(db)
+    return datetime.now(tz).date()
 
 
 def _tz(db: Session) -> ZoneInfo:
@@ -97,15 +132,16 @@ def record_crossing(db: Session, camera, person_id, age, gender, ts=None) -> Cro
     return event
 
 
-def log_crossing(camera, person_id, age, gender, ts=None) -> None:
-    """Удобная обёртка для воркера: сама открывает/закрывает сессию,
-    чтобы воркеру не нужно было управлять Session явно (как и в старом update_stats)."""
+def log_crossing(camera, person_id, age, gender, ts=None) -> bool:
+    """Записывает событие и возвращает True только после успешного COMMIT."""
     session = SessionLocal()
     try:
         record_crossing(session, camera, person_id, age, gender, ts)
+        return True
     except Exception as e:
         session.rollback()
         print("DB ERROR (log_crossing):", e)
+        return False
     finally:
         session.close()
 
@@ -274,7 +310,14 @@ def get_month_timeseries(db: Session, any_day: date, gate: str | None = None) ->
 
     new_unique_by_day = Counter(first_seen_day.values())
 
-    last_day = min(next_month_start - timedelta(days=1), any_day)
+    # Текущий месяц показываем только до сегодняшнего дня; исторический
+    # месяц всегда полный, независимо от того, какую дату внутри месяца
+    # передал клиент.
+    current_local_date = datetime.now(tz).date()
+    if month_start.year == current_local_date.year and month_start.month == current_local_date.month:
+        last_day = current_local_date
+    else:
+        last_day = next_month_start - timedelta(days=1)
     daily = []
     cumulative = 0
     d = month_start

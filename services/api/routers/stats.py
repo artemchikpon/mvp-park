@@ -37,7 +37,7 @@ def day(
     gate: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    return svc.get_day_timeseries(db, day or date.today(), gate=gate)
+    return svc.get_day_timeseries(db, day or svc.current_park_date(db), gate=gate)
 
 
 @router.get("/week", response_model=WeekTimeseriesOut,
@@ -47,7 +47,7 @@ def week(
     gate: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    return svc.get_week_timeseries(db, day or date.today(), gate=gate)
+    return svc.get_week_timeseries(db, day or svc.current_park_date(db), gate=gate)
 
 
 @router.get("/month", response_model=MonthTimeseriesOut,
@@ -57,7 +57,7 @@ def month(
     gate: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    return svc.get_month_timeseries(db, day or date.today(), gate=gate)
+    return svc.get_month_timeseries(db, day or svc.current_park_date(db), gate=gate)
 
 
 @router.get("/demographics", response_model=DemographicsOut,
@@ -68,7 +68,7 @@ def demographics(
     gate: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    start_utc, end_utc = svc.period_bounds(db, period, day or date.today())
+    start_utc, end_utc = svc.period_bounds(db, period, day or svc.current_park_date(db))
     return svc.get_demographics(db, start_utc, end_utc, gate=gate)
 
 
@@ -79,4 +79,4 @@ def dashboard(
     gate: Optional[str] = Query(None, description="Фильтр по конкретной точке Вход/Выход"),
     db: Session = Depends(get_db),
 ):
-    return svc.get_dashboard(db, day or date.today(), gate=gate)
+    return svc.get_dashboard(db, day or svc.current_park_date(db), gate=gate)

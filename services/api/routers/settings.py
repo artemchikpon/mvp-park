@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from db.database import SessionLocal
@@ -25,4 +25,7 @@ def get_settings(db: Session = Depends(get_db)):
 @router.put("/", response_model=ParkSettingsOut,
             summary="Обновить вместимость / порог предупреждения / таймзону")
 def update_settings(body: ParkSettingsUpdate, db: Session = Depends(get_db)):
-    return svc.update_settings(db, **body.model_dump(exclude_none=True))
+    try:
+        return svc.update_settings(db, **body.model_dump(exclude_none=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

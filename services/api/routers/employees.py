@@ -5,7 +5,6 @@ import uuid
 import numpy as np
 import httpx
 import cv2
-import redis
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -21,7 +20,7 @@ log = logging.getLogger("employees_router")
 router = APIRouter(prefix="/employees", tags=["employees"])
 
 HR_BASE = os.environ.get("HR_API_BASE", "https://central-park.rzbtech.uz").rstrip("/")
-SSL_VERIFY = os.environ.get("HR_SSL_VERIFY", "false").lower() != "false"
+SSL_VERIFY = os.environ.get("HR_SSL_VERIFY", "true").lower() != "false"
 SIMILARITY = 0.65
 EMB_DTYPE = np.float32
 
@@ -32,15 +31,21 @@ EMB_DTYPE = np.float32
 REDIS_HOST = os.environ.get("REDIS_HOST", "redis")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
 EMPLOYEE_SYNC_JOBS_KEY = "employee_sync_jobs"
+EMPLOYEE_ADD_JOBS_KEY = "employee_add_jobs"
 EMPLOYEE_SYNC_TIMEOUT = int(os.environ.get("EMPLOYEE_SYNC_TIMEOUT", "120"))
 
-redis_client = redis.Redis(
-    host=REDIS_HOST,
-    port=REDIS_PORT,
-    decode_responses=True,
-    socket_timeout=EMPLOYEE_SYNC_TIMEOUT + 5,
-    socket_connect_timeout=5,
-)
+def _redis_client():
+    # Redis нужен только для /employees/sync. Не импортируем клиент на уровне
+    # модуля, чтобы обычные API endpoints не зависели от redis-пакета при
+    # старте/тестировании.
+    import redis
+    return redis.Redis(
+        host=REDIS_HOST,
+        port=REDIS_PORT,
+        decode_responses=True,
+        socket_timeout=EMPLOYEE_SYNC_TIMEOUT + 5,
+        socket_connect_timeout=5,
+    )
 
 
 
@@ -145,8 +150,10 @@ def sync_employees_route():
     job_id = str(uuid.uuid4())
     result_key = f"employee_sync_result:{job_id}"
 
+    import redis
+    redis_client = _redis_client()
     try:
-        redis_client.rpush(EMPLOYEE_SYNC_JOBS_KEY, job_id)
+        redis_client.rpush(EMPLOYEE_SYNC_JOBS_KEY, json.dumps({"job_id": job_id}))
     except redis.exceptions.RedisError as e:
         raise HTTPException(
             status_code=503,
@@ -180,38 +187,41 @@ def sync_employees_route():
 
 
 @router.post("/add", response_model=EmployeeOut, summary="Добавить сотрудника вручную")
-def add_employee(body: AddEmployeeRequest, db: Session = Depends(get_db)):
+def add_employee(body: AddEmployeeRequest):
+    """Отправляет задачу в worker, где доступны face_engine/InsightFace."""
+    import redis
 
-    # Проверяем нет ли уже такого external_id
-    if body.external_id is not None:
-        existing = db.query(Employee).filter(
-            Employee.external_id == body.external_id
-        ).first()
-        if existing:
-            # Обновляем
-            frame = _fetch_frame_from_file(body.file_id)
-            emb = _extract_embedding(frame)
-            existing.embedding = _emb_to_bytes(emb)
-            existing.first_name = body.first_name
-            existing.file_id = body.file_id
-            db.commit()
-            db.refresh(existing)
-            return existing
+    job_id = str(uuid.uuid4())
+    result_key = f"employee_add_result:{job_id}"
+    redis_client = _redis_client()
+    payload = json.dumps({
+        "job_id": job_id,
+        "first_name": body.first_name,
+        "file_id": body.file_id,
+        "external_id": body.external_id,
+    })
 
-    # Новый сотрудник
-    frame = _fetch_frame_from_file(body.file_id)
-    emb = _extract_embedding(frame)
+    try:
+        redis_client.rpush(EMPLOYEE_ADD_JOBS_KEY, payload)
+        response = redis_client.blpop(result_key, timeout=EMPLOYEE_SYNC_TIMEOUT)
+    except redis.exceptions.RedisError as e:
+        raise HTTPException(status_code=503, detail=f"Redis недоступен: {e}") from e
 
-    emp = Employee(
-        external_id=body.external_id,
-        first_name=body.first_name,
-        file_id=body.file_id,
-        embedding=_emb_to_bytes(emb),
-    )
-    db.add(emp)
-    db.commit()
-    db.refresh(emp)
-    return emp
+    if response is None:
+        raise HTTPException(
+            status_code=504,
+            detail=f"Worker не ответил за {EMPLOYEE_SYNC_TIMEOUT} сек.",
+        )
+
+    _, payload_raw = response
+    data = json.loads(payload_raw)
+    if "error" in data:
+        message = data["error"]
+        if "Лицо не найдено" in message or "embedding" in message:
+            raise HTTPException(status_code=422, detail=message)
+        raise HTTPException(status_code=502, detail=message)
+
+    return data
 
 
 @router.delete(

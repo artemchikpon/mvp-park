@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from typing import Optional, Literal
 from datetime import datetime, date
 
@@ -29,6 +29,16 @@ class CameraUpdate(BaseModel):
     direction: Optional[Direction] = None
     gate: Optional[str] = None
     active: Optional[bool] = None
+
+    @field_validator("url")
+    @classmethod
+    def url_not_empty(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        if not v.strip():
+            raise ValueError("url не может быть пустым")
+        return v.strip()
+
 
 
 class CameraOut(BaseModel):
@@ -120,15 +130,37 @@ class ParkSettingsUpdate(BaseModel):
     @classmethod
     def capacity_positive(cls, v):
         if v is not None and v <= 0:
-            raise ValueError("capacity должен быть positive")
+            raise ValueError("capacity должен быть положительным")
         return v
 
     @field_validator("warning_threshold")
     @classmethod
     def threshold_positive(cls, v):
         if v is not None and v <= 0:
-            raise ValueError("warning_threshold должен быть positive")
+            raise ValueError("warning_threshold должен быть положительным")
         return v
+
+    @field_validator("timezone")
+    @classmethod
+    def timezone_valid(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        value = v.strip()
+        if not value:
+            raise ValueError("timezone не может быть пустым")
+        try:
+            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise ValueError(f"Невалидная timezone: {value}")
+        return value
+
+    @model_validator(mode="after")
+    def validate_threshold(self):
+        if self.capacity is not None and self.warning_threshold is not None:
+            if self.warning_threshold > self.capacity:
+                raise ValueError("warning_threshold не может быть больше capacity")
+        return self
 
 
 # ── Persons ───────────────────────────────────────────────────────────────────

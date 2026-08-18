@@ -25,6 +25,7 @@ import cv2
 from db.database import SessionLocal
 from db.models import Employee
 from face_engine import extract_faces
+from face_storage_pg import FaceStoragePG
 
 log = logging.getLogger("employee_sync")
 
@@ -36,7 +37,7 @@ FILE_URL_TPL = f"{HR_BASE}/api/v1/files/{{file_id}}/view"
 EMPLOYEES_PAGE_LIMIT = int(os.environ.get("HR_EMPLOYEES_PAGE_LIMIT", "100"))
 
 # Отключаем проверку SSL для self-signed серта (локальная сеть)
-SSL_VERIFY = os.environ.get("HR_SSL_VERIFY", "false").lower() != "false"
+SSL_VERIFY = os.environ.get("HR_SSL_VERIFY", "true").strip().lower() not in {"false", "0", "no"}
 
 
 def _fetch_employees() -> list[dict]:
@@ -141,6 +142,75 @@ def _upsert_employee(
         return True
 
 
+
+def add_employee_from_file(first_name: str, file_id: int, external_id: int | None = None) -> dict:
+    """Создаёт/обновляет сотрудника по фото HR API в worker-контейнере."""
+    frame = _fetch_photo_as_frame(file_id)
+    if frame is None:
+        raise RuntimeError(f"Не удалось скачать или декодировать фото file_id={file_id}")
+
+    faces = extract_faces(frame)
+    if not faces:
+        raise ValueError("Лицо не найдено на фотографии")
+    face = faces[0]
+    if face.embedding is None:
+        raise ValueError("Не удалось извлечь embedding лица")
+
+    session = SessionLocal()
+    try:
+        if external_id is not None:
+            existing = session.query(Employee).filter(Employee.external_id == external_id).first()
+            if existing is not None:
+                existing.embedding = _emb_to_bytes(face.embedding)
+                existing.first_name = first_name
+                existing.file_id = file_id
+                session.commit()
+                session.refresh(existing)
+                FaceStoragePG.invalidate_cache()
+                return {
+                    "id": existing.id, "external_id": existing.external_id,
+                    "first_name": existing.first_name, "file_id": existing.file_id,
+                    "created_at": existing.created_at.isoformat() if existing.created_at else None,
+                }
+
+        emp = Employee(
+            external_id=external_id,
+            first_name=first_name,
+            file_id=file_id,
+            embedding=_emb_to_bytes(face.embedding),
+        )
+        session.add(emp)
+        try:
+            session.commit()
+        except Exception:
+            session.rollback()
+            # Параллельный запрос мог вставить тот же external_id.
+            if external_id is not None:
+                existing = session.query(Employee).filter(Employee.external_id == external_id).first()
+                if existing is not None:
+                    existing.embedding = _emb_to_bytes(face.embedding)
+                    existing.first_name = first_name
+                    existing.file_id = file_id
+                    session.commit()
+                    session.refresh(existing)
+                    FaceStoragePG.invalidate_cache()
+                    return {
+                        "id": existing.id, "external_id": existing.external_id,
+                        "first_name": existing.first_name, "file_id": existing.file_id,
+                        "created_at": existing.created_at.isoformat() if existing.created_at else None,
+                    }
+            raise
+        session.refresh(emp)
+        result = {
+            "id": emp.id, "external_id": emp.external_id,
+            "first_name": emp.first_name, "file_id": emp.file_id,
+            "created_at": emp.created_at.isoformat() if emp.created_at else None,
+        }
+        FaceStoragePG.invalidate_cache()
+        return result
+    finally:
+        session.close()
+
 def sync_employees() -> dict:
     """
     Основная функция синхронизации.
@@ -201,11 +271,32 @@ def sync_employees() -> dict:
                 log.info(f"[employee_sync] Обновлён: {first_name} (external_id={ext_id})")
         except Exception as e:
             session.rollback()
-            log.error(f"[employee_sync] Ошибка сохранения сотрудника id={ext_id}: {e}")
-            errors += 1
+            # При параллельном старте двух worker-реплик обе могут увидеть
+            # отсутствие external_id. Если одна уже вставила строку, вторая
+            # повторно получает её и делает UPDATE вместо ложной ошибки.
+            try:
+                existing = (
+                    session.query(Employee)
+                    .filter(Employee.external_id == ext_id)
+                    .first()
+                )
+                if existing is not None:
+                    existing.embedding = _emb_to_bytes(face.embedding)
+                    existing.first_name = first_name
+                    existing.file_id = file_id
+                    session.commit()
+                    updated += 1
+                    log.info(f"[employee_sync] Гонка INSERT разрешена UPDATE: {first_name} (external_id={ext_id})")
+                else:
+                    raise e
+            except Exception:
+                session.rollback()
+                log.error(f"[employee_sync] Ошибка сохранения сотрудника id={ext_id}: {e}")
+                errors += 1
         finally:
             session.close()
 
+    FaceStoragePG.invalidate_cache()
     result = {"added": added, "updated": updated, "skipped": skipped, "errors": errors}
     log.info(f"[employee_sync] Завершено: {result}")
     return result
