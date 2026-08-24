@@ -4,6 +4,7 @@ from typing import List, Optional
 
 from db.database import SessionLocal
 from db.models import Person
+from db import stats_service as svc
 from api.schemas import PersonOut
 
 router = APIRouter(prefix="/persons", tags=["persons"])
@@ -35,3 +36,18 @@ def list_persons(
 @router.get("/count", summary="Общее количество уникальных лиц в базе")
 def count_persons(db: Session = Depends(get_db)):
     return {"count": db.query(Person).count()}
+
+
+@router.post(
+    "/reset",
+    summary="Немедленно очистить галерею уникальных лиц (persons)",
+    description=(
+        "Ручной аналог автоматического ежедневного сброса (12:00 по "
+        "таймзоне парка, см. worker._persons_reset_loop). История "
+        "пересечений (crossing_events) не удаляется, только теряет "
+        "ссылку на удалённый person_id."
+    ),
+)
+def reset_persons(db: Session = Depends(get_db)):
+    deleted = svc.reset_persons(db)
+    return {"deleted": deleted}

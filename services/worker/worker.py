@@ -9,11 +9,13 @@ import logging
 import time
 import threading
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from face_engine import extract_faces
 from face_storage_pg import FaceStoragePG
 from employee_sync import sync_employees, add_employee_from_file
-from db.stats_service import log_crossing
+from db.stats_service import log_crossing, get_settings, reset_persons
 from db.database import wait_for_db, wait_for_redis, SessionLocal
 from db.models import Camera
 
@@ -105,6 +107,92 @@ def _camera_reload_loop():
     while True:
         _reload_cameras()
         time.sleep(CAMERA_RELOAD_INTERVAL)
+
+
+# ── Ежедневный сброс таблицы persons ─────────────────────────────────────────
+# Продуктовое требование: галерея векторов уникальных лиц (persons) должна
+# каждый день начинаться "с нуля" — сбрасываем её раз в сутки в 12:00 по
+# таймзоне парка (park_settings.timezone, та же настройка, что и для
+# Live Occupancy/дашборда). Время сброса можно переопределить через env
+# (например, для отладки).
+PERSONS_RESET_HOUR = int(os.environ.get("PERSONS_RESET_HOUR", "12"))
+PERSONS_RESET_MINUTE = int(os.environ.get("PERSONS_RESET_MINUTE", "0"))
+
+# Реплик воркера несколько (см. docker-compose: replicas: 2), и все они
+# просыпаются в одну и ту же минуту. Redis-лок с TTL и SET NX гарантирует,
+# что реально удалит записи только одна реплика — тот же паттерн, что и у
+# cooldown-резервации выше.
+PERSONS_RESET_LOCK_KEY = "persons_reset_lock"
+PERSONS_RESET_LOCK_TTL = 300  # сек — с запасом на выполнение DELETE
+
+
+def _park_timezone() -> ZoneInfo:
+    """Таймзона парка из park_settings. При любой ошибке — UTC, чтобы поток
+    сброса не падал и не блокировал остальную работу воркера."""
+    session = SessionLocal()
+    try:
+        return ZoneInfo(get_settings(session).timezone)
+    except Exception as e:
+        log.warning(f"[persons_reset] Не удалось прочитать таймзону парка, использую UTC: {e}")
+        return ZoneInfo("UTC")
+    finally:
+        session.close()
+
+
+def _seconds_until_next_persons_reset() -> float:
+    tz = _park_timezone()
+    now = datetime.now(tz)
+    target = now.replace(
+        hour=PERSONS_RESET_HOUR, minute=PERSONS_RESET_MINUTE, second=0, microsecond=0
+    )
+    if target <= now:
+        target += timedelta(days=1)
+    return (target - now).total_seconds()
+
+
+def _run_persons_reset_once() -> None:
+    tz = _park_timezone()
+    today = datetime.now(tz).date().isoformat()
+    lock_key = f"{PERSONS_RESET_LOCK_KEY}:{today}"
+
+    # nx=True: если лок на сегодня уже стоит — сброс уже выполнила (или
+    # выполняет) другая реплика, повторно ничего не делаем.
+    if not r.set(lock_key, CONSUMER, ex=PERSONS_RESET_LOCK_TTL, nx=True):
+        log.info("[persons_reset] Сброс persons на сегодня уже выполнен другой репликой")
+        return
+
+    session = SessionLocal()
+    try:
+        deleted = reset_persons(session)
+        # Локальный in-memory кэш векторов (см. FaceStoragePG) может ещё
+        # какое-то время (до CACHE_TTL_SECONDS) отдавать удалённые записи —
+        # инвалидируем сразу, чтобы новые лица не "склеивались" со старыми.
+        FaceStoragePG.invalidate_cache()
+        log.info(
+            f"[persons_reset] Таблица persons очищена: удалено {deleted} записей "
+            f"(плановый сброс {PERSONS_RESET_HOUR:02d}:{PERSONS_RESET_MINUTE:02d} "
+            f"по таймзоне парка)"
+        )
+    except Exception:
+        log.exception("[persons_reset] Ошибка сброса таблицы persons")
+        # Снимаем лок, чтобы попытку можно было безопасно повторить (иначе
+        # до конца дня persons так и останется незачищенной).
+        try:
+            r.delete(lock_key)
+        except redis.exceptions.RedisError:
+            log.warning("[persons_reset] Не удалось снять лок после ошибки")
+    finally:
+        session.close()
+
+
+def _persons_reset_loop():
+    while True:
+        try:
+            time.sleep(_seconds_until_next_persons_reset())
+            _run_persons_reset_once()
+        except Exception:
+            log.exception("[persons_reset] Ошибка в цикле сброса; повтор через 60с")
+            time.sleep(60)
 
 
 EMPLOYEE_SYNC_JOBS_KEY = "employee_sync_jobs"
@@ -356,6 +444,7 @@ def main():
 
     _reload_cameras()  # первичная загрузка перед стартом основного цикла
     threading.Thread(target=_camera_reload_loop, daemon=True).start()
+    threading.Thread(target=_persons_reset_loop, daemon=True).start()
 
     # Не блокируем обработку кадров из-за медленного HR API. Синхронизация
     # выполняется в отдельном фоне, а очередь /employees/sync продолжает

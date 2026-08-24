@@ -9,7 +9,7 @@ from datetime import date, datetime, timedelta
 import pytest
 
 from db import stats_service as svc
-from db.models import Camera, CrossingEvent
+from db.models import Camera, CrossingEvent, Person
 
 
 # ── group_age ────────────────────────────────────────────────────────────────
@@ -347,3 +347,43 @@ def test_record_crossing_keeps_valid_zero_age_and_gender(db_session):
     event = svc.record_crossing(db_session, cam, person_id=1, age=0, gender=0)
     assert event.age == 0
     assert event.gender == 0
+
+
+# ── reset_persons (ежедневный сброс галереи лиц) ────────────────────────────
+
+def _make_person(db_session, embedding=b"\x00" * 8):
+    p = Person(embedding=embedding, age=30, gender=1)
+    db_session.add(p)
+    db_session.commit()
+    db_session.refresh(p)
+    return p
+
+
+def test_reset_persons_deletes_all_rows_and_returns_count(db_session):
+    _make_person(db_session)
+    _make_person(db_session)
+    _make_person(db_session)
+
+    deleted = svc.reset_persons(db_session)
+
+    assert deleted == 3
+    assert db_session.query(Person).count() == 0
+
+
+def test_reset_persons_nulls_person_id_on_existing_crossing_events(db_session):
+    """Историю посещений (crossing_events) сброс не должен удалять — только
+    отвязать её от больше не существующих Person, иначе FK был бы нарушен."""
+    cam = _make_camera(db_session, direction="in")
+    person = _make_person(db_session)
+    event = _add_event(db_session, cam, datetime.utcnow(), person_id=person.id)
+
+    svc.reset_persons(db_session)
+
+    db_session.refresh(event)
+    assert event.person_id is None
+    # само событие (и его age/gender/ts на момент пересечения) сохраняется
+    assert db_session.query(CrossingEvent).count() == 1
+
+
+def test_reset_persons_returns_zero_when_table_already_empty(db_session):
+    assert svc.reset_persons(db_session) == 0

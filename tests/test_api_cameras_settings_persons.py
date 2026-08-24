@@ -175,3 +175,42 @@ def test_list_persons_limit_out_of_range_is_rejected(api_client, api_key_header)
     assert resp.status_code == 422
     resp = api_client.get("/persons/", headers=api_key_header, params={"limit": 501})
     assert resp.status_code == 422
+
+
+def test_reset_persons_clears_table_and_returns_deleted_count(api_client, api_key_header, db_session):
+    for i in range(3):
+        db_session.add(Person(embedding=b"\x00" * 2048, age=20 + i, gender=i % 2))
+    db_session.commit()
+
+    resp = api_client.post("/persons/reset", headers=api_key_header)
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": 3}
+
+    resp = api_client.get("/persons/count", headers=api_key_header)
+    assert resp.json() == {"count": 0}
+
+
+def test_reset_persons_nulls_person_id_on_crossing_events(api_client, api_key_header, db_session):
+    from db.models import Camera, CrossingEvent
+
+    cam = Camera(name="A", url="rtsp://a", direction="in")
+    db_session.add(cam)
+    db_session.commit()
+
+    person = Person(embedding=b"\x00" * 2048, age=20, gender=1)
+    db_session.add(person)
+    db_session.commit()
+    db_session.refresh(person)
+
+    event = CrossingEvent(camera_id=cam.id, direction="in", person_id=person.id)
+    db_session.add(event)
+    db_session.commit()
+    event_id = event.id
+
+    resp = api_client.post("/persons/reset", headers=api_key_header)
+    assert resp.status_code == 200
+
+    db_session.expire_all()
+    kept = db_session.get(CrossingEvent, event_id)
+    assert kept is not None
+    assert kept.person_id is None

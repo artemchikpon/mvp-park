@@ -44,7 +44,7 @@ class CrossingEvent(Base):
     camera_id = Column(Integer, ForeignKey("cameras.id"), nullable=False)
     direction = Column(String(3), nullable=False)        # 'in' | 'out' (снэпшот камеры)
     gate = Column(String(128), nullable=True)             # снэпшот камеры
-    person_id = Column(Integer, ForeignKey("persons.id"), nullable=True)
+    person_id = Column(Integer, ForeignKey("persons.id", ondelete="SET NULL"), nullable=True)
     age = Column(Integer, nullable=True)                  # возраст в момент пересечения
     gender = Column(Integer, nullable=True)               # пол в момент пересечения
     ts = Column(DateTime, default=datetime.utcnow, nullable=False)

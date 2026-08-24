@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 from db.database import SessionLocal
-from db.models import CrossingEvent, ParkSettings
+from db.models import CrossingEvent, ParkSettings, Person
 
 
 # ── Возрастные группы (строго по ТЗ, раздел 2, Блок А) ──────────────────────
@@ -144,6 +144,34 @@ def log_crossing(camera, person_id, age, gender, ts=None) -> bool:
         return False
     finally:
         session.close()
+
+
+# ── Ежедневный сброс галереи лиц (Person) ────────────────────────────────────
+#
+# persons — это не история посещений, а "рабочая" галерея векторов для
+# распознавания "тот же human или новый" (см. FaceStoragePG.identify).
+# По требованию продукта эта галерея должна каждый день начинаться с нуля
+# (в 12:00 по таймзоне парка, см. worker._persons_reset_loop), т.е. один и
+# тот же посетитель, пришедший сегодня и завтра, будет распознан как два
+# разных Person.
+#
+# crossing_events (сама история пересечений — сколько, когда, откуда) не
+# трогаем: только отвязываем от неё удаляемые person_id (age/gender на
+# момент пересечения уже сохранены в самой строке события и не теряются).
+
+def reset_persons(db: Session) -> int:
+    """Полностью очищает таблицу persons (embedding-векторы уникальных лиц).
+
+    Возвращает количество удалённых записей. Историю crossing_events не
+    удаляет — только обнуляет ссылку person_id у уже прошедших событий,
+    чтобы не нарушить внешний ключ.
+    """
+    db.query(CrossingEvent).filter(CrossingEvent.person_id.isnot(None)).update(
+        {CrossingEvent.person_id: None}, synchronize_session=False
+    )
+    deleted = db.query(Person).delete(synchronize_session=False)
+    db.commit()
+    return deleted
 
 
 # ── Live Occupancy (раздел ТЗ "Блок Б") ──────────────────────────────────────

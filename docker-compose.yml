@@ -92,6 +92,8 @@ services:
       DATABASE_URL: postgresql://face:face@postgres:5432/face_db
       REDIS_HOST: redis
       CROSSING_COOLDOWN_SECONDS: "60"
+      PERSONS_RESET_HOUR: "12"
+      PERSONS_RESET_MINUTE: "0"
       HR_API_BASE: "https://central-park.rzbtech.uz"
       HR_SSL_VERIFY: "true"
     extra_hosts:

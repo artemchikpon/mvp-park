@@ -20,10 +20,10 @@ pytest -v
 
 | Файл | Что тестирует |
 |---|---|
-| `test_stats_service.py` | Бизнес-логика аналитики: Live Occupancy, графики день/неделя/месяц, демография, группировка по возрасту, санитизация некорректных age/gender |
+| `test_stats_service.py` | Бизнес-логика аналитики: Live Occupancy, графики день/неделя/месяц, демография, группировка по возрасту, санитизация некорректных age/gender, ежедневный сброс галереи лиц (`reset_persons`) |
 | `test_auth.py` | API-key авторизация (`require_api_key`) — юнит + через реальные роуты |
-| `test_api_cameras_settings_persons.py` | CRUD камер, настройки парка, список/счётчик уникальных лиц — через `TestClient` |
-| `test_worker.py` | Cooldown-дедупликация пересечений, кэш камер, сквозная обработка кадра `_process_entry` (кадр из Redis → событие в БД) |
+| `test_api_cameras_settings_persons.py` | CRUD камер, настройки парка, список/счётчик/ручной сброс (`POST /persons/reset`) уникальных лиц — через `TestClient` |
+| `test_worker.py` | Cooldown-дедупликация пересечений, кэш камер, сквозная обработка кадра `_process_entry` (кадр из Redis → событие в БД), ежедневный сброс `persons` (`_persons_reset_loop` и Redis-лок против двойного удаления двумя репликами) |
 | `test_face_storage.py` | Сопоставление лиц по cosine similarity, фильтрация сотрудников, выбор лучшего совпадения при нескольких похожих |
 | `test_schemas.py` | Pydantic-валидаторы (`CameraCreate`, `ParkSettingsUpdate`) |
 

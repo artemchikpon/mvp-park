@@ -10,12 +10,15 @@ Redis подменяется на fakeredis (in-memory реализация пр
 не нужен реальный Redis-сервер и не нужен docker-compose.
 """
 
+from datetime import datetime, timedelta
+
 import fakeredis
 import numpy as np
 import pytest
 
 import worker as worker_module
-from db.models import Camera
+from db.models import Camera, Person
+from db import stats_service as svc
 
 
 @pytest.fixture(autouse=True)
@@ -188,3 +191,59 @@ def test_process_entry_respects_cooldown_for_repeated_face(db_session, monkeypat
 
     from db.models import CrossingEvent
     assert db_session.query(CrossingEvent).count() == 1  # второй раз — cooldown
+
+
+# ── ежедневный сброс persons (_seconds_until_next_persons_reset /
+#    _run_persons_reset_once) ────────────────────────────────────────────────
+
+def test_seconds_until_next_reset_is_within_24h_and_positive(db_session):
+    svc.get_settings(db_session)  # park_settings.timezone по умолчанию UTC
+    seconds = worker_module._seconds_until_next_persons_reset()
+    assert 0 < seconds <= 24 * 3600
+
+
+def test_run_persons_reset_once_clears_persons_table(db_session):
+    svc.get_settings(db_session)
+    db_session.add(Person(embedding=b"\x00" * 8, age=30, gender=1))
+    db_session.add(Person(embedding=b"\x01" * 8, age=25, gender=0))
+    db_session.commit()
+    assert db_session.query(Person).count() == 2
+
+    worker_module._run_persons_reset_once()
+
+    assert db_session.query(Person).count() == 0
+
+
+def test_run_persons_reset_once_is_a_noop_for_second_replica_same_day(db_session, fake_redis):
+    """Вторая реплика воркера, проснувшаяся в ту же минуту, не должна ничего
+    удалять повторно — лок в Redis уже занят первой репликой."""
+    svc.get_settings(db_session)
+    db_session.add(Person(embedding=b"\x00" * 8, age=30, gender=1))
+    db_session.commit()
+
+    worker_module._run_persons_reset_once()  # "первая реплика" — реально чистит
+    db_session.add(Person(embedding=b"\x02" * 8, age=40, gender=1))
+    db_session.commit()
+
+    worker_module._run_persons_reset_once()  # "вторая реплика" — лок уже занят
+
+    # Лицо, добавленное ПОСЛЕ первого сброса, должно остаться нетронутым.
+    assert db_session.query(Person).count() == 1
+
+
+def test_run_persons_reset_once_releases_lock_on_error(db_session, monkeypatch):
+    """Если DELETE упал (например, обрыв соединения), лок на сегодня нужно
+    снять — иначе таблица останется незачищенной до следующих суток."""
+    svc.get_settings(db_session)
+
+    def _boom(session):
+        raise RuntimeError("db is down")
+
+    monkeypatch.setattr(worker_module, "reset_persons", _boom)
+
+    worker_module._run_persons_reset_once()
+
+    tz = worker_module._park_timezone()
+    today = datetime.now(tz).date().isoformat()
+    lock_key = f"{worker_module.PERSONS_RESET_LOCK_KEY}:{today}"
+    assert worker_module.r.exists(lock_key) == 0
