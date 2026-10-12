@@ -1,22 +1,26 @@
 """
-Тесты для services/worker/worker.py.
+Тесты для модулей worker-сервиса (services/worker): crossings, camera_cache,
+persons_reset.
 
-worker.py импортируется как обычный модуль благодаря рефакторингу: вся
-side-effecting инициализация (подключение к БД/Redis, синхронизация
-сотрудников, запуск потоков, бесконечный цикл) вынесена в main(), которая
-здесь не вызывается — тестируем только чистую логику.
+Вся side-effecting инициализация (подключение к БД/Redis, синхронизация
+сотрудников, запуск потоков, бесконечный цикл) находится в worker.main(),
+которая здесь не вызывается — тестируем только логику модулей.
 
 Redis подменяется на fakeredis (in-memory реализация протокола Redis) —
 не нужен реальный Redis-сервер и не нужен docker-compose.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import fakeredis
 import numpy as np
 import pytest
 
-import worker as worker_module
+import camera_cache
+import crossings
+import persons_reset
+import redis_conn
+import worker_config
 from db.models import Camera, Person
 from db import stats_service as svc
 
@@ -26,73 +30,73 @@ def fake_redis(monkeypatch):
     """Подменяем redis-клиент воркера на fakeredis для каждого теста —
     чтобы cooldown-ключи из одного теста не утекали в другой."""
     fr = fakeredis.FakeRedis(decode_responses=False)
-    monkeypatch.setattr(worker_module, "r", fr)
+    monkeypatch.setattr(redis_conn, "r", fr)
     return fr
 
 
-# ── cooldown dedup (_already_counted_recently) ──────────────────────────────
+# ── cooldown dedup (already_counted_recently) ──────────────────────────────
 
 def test_first_sighting_is_not_deduped():
-    assert worker_module._already_counted_recently(camera_id=1, person_id=42) is False
+    assert crossings.already_counted_recently(camera_id=1, person_id=42) is False
 
 
 def test_second_sighting_within_cooldown_is_deduped():
-    worker_module._already_counted_recently(camera_id=1, person_id=42)
-    assert worker_module._already_counted_recently(camera_id=1, person_id=42) is True
+    crossings.already_counted_recently(camera_id=1, person_id=42)
+    assert crossings.already_counted_recently(camera_id=1, person_id=42) is True
 
 
 def test_cooldown_is_scoped_per_camera_not_global():
     """Один и тот же человек на РАЗНЫХ камерах не должен считаться
     дублем — cooldown-ключ включает camera_id."""
-    worker_module._already_counted_recently(camera_id=1, person_id=42)
-    assert worker_module._already_counted_recently(camera_id=2, person_id=42) is False
+    crossings.already_counted_recently(camera_id=1, person_id=42)
+    assert crossings.already_counted_recently(camera_id=2, person_id=42) is False
 
 
 def test_cooldown_is_scoped_per_person():
-    worker_module._already_counted_recently(camera_id=1, person_id=42)
-    assert worker_module._already_counted_recently(camera_id=1, person_id=43) is False
+    crossings.already_counted_recently(camera_id=1, person_id=42)
+    assert crossings.already_counted_recently(camera_id=1, person_id=43) is False
 
 
 def test_cooldown_key_ttl_matches_configured_window(fake_redis):
-    worker_module._already_counted_recently(camera_id=1, person_id=42)
+    crossings.already_counted_recently(camera_id=1, person_id=42)
     ttl = fake_redis.ttl(b"crossing_cooldown:1:42")
-    assert 0 < ttl <= worker_module.CROSSING_COOLDOWN_SECONDS
+    assert 0 < ttl <= worker_config.CROSSING_COOLDOWN_SECONDS
 
 
-# ── camera cache (_reload_cameras / get_camera) ─────────────────────────────
+# ── camera cache (reload_cameras / get_camera) ─────────────────────────────
 
 def test_reload_cameras_populates_cache_from_db(db_session):
     db_session.add(Camera(name="A", url="rtsp://a", direction="in", gate="G1"))
     db_session.add(Camera(name="B", url="rtsp://b", direction="out", gate="G1"))
     db_session.commit()
 
-    worker_module._reload_cameras()
+    camera_cache.reload_cameras()
 
-    a = worker_module.get_camera(1)
+    a = camera_cache.get_camera(1)
     assert a is not None
     assert a.direction == "in"
     assert a.gate == "G1"
 
 
 def test_get_camera_returns_none_for_unknown_id(db_session):
-    worker_module._reload_cameras()
-    assert worker_module.get_camera(9999) is None
+    camera_cache.reload_cameras()
+    assert camera_cache.get_camera(9999) is None
 
 
 def test_reload_cameras_removes_deleted_cameras_from_cache(db_session):
     cam = Camera(name="A", url="rtsp://a", direction="in")
     db_session.add(cam)
     db_session.commit()
-    worker_module._reload_cameras()
-    assert worker_module.get_camera(cam.id) is not None
+    camera_cache.reload_cameras()
+    assert camera_cache.get_camera(cam.id) is not None
 
     db_session.delete(cam)
     db_session.commit()
-    worker_module._reload_cameras()
-    assert worker_module.get_camera(cam.id) is None
+    camera_cache.reload_cameras()
+    assert camera_cache.get_camera(cam.id) is None
 
 
-# ── _process_entry: сквозной путь "кадр из Redis -> событие в БД" ──────────
+# ── process_frame: сквозной путь "кадр из Redis -> событие в БД" ──────────
 
 class _FakeFace:
     def __init__(self, embedding, age=30, gender=1):
@@ -112,35 +116,35 @@ def _jpeg_bytes():
 
 
 def test_process_entry_skips_unknown_camera(monkeypatch, caplog):
-    monkeypatch.setattr(worker_module, "get_camera", lambda cid: None)
+    monkeypatch.setattr(camera_cache, "get_camera", lambda cid: None)
     calls = []
-    monkeypatch.setattr(worker_module, "extract_faces", lambda frame: calls.append(1))
+    monkeypatch.setattr(crossings, "extract_faces", lambda frame: calls.append(1))
 
-    worker_module._process_entry(b"1-1", {b"camera_id": b"999", b"frame": _jpeg_bytes()})
+    crossings.process_frame(b"1-1", {b"camera_id": b"999", b"frame": _jpeg_bytes()})
 
     assert calls == []  # до детекции лиц дело не дошло
 
 
 def test_process_entry_skips_frame_without_camera_id():
     # Не должно падать с KeyError — camera_id просто отсутствует в data
-    worker_module._process_entry(b"1-1", {b"frame": _jpeg_bytes()})
+    crossings.process_frame(b"1-1", {b"frame": _jpeg_bytes()})
 
 
 def test_process_entry_records_crossing_for_new_visitor(db_session, monkeypatch):
     cam = Camera(name="A", url="rtsp://a", direction="in", gate="G1")
     db_session.add(cam)
     db_session.commit()
-    worker_module._reload_cameras()
+    camera_cache.reload_cameras()
 
     embedding = np.random.rand(512).astype(np.float32)
     fake_face = _FakeFace(embedding, age=25, gender=1)
-    monkeypatch.setattr(worker_module, "extract_faces", lambda frame: [fake_face])
+    monkeypatch.setattr(crossings, "extract_faces", lambda frame: [fake_face])
     monkeypatch.setattr(
-        worker_module.storage, "identify",
+        crossings.storage, "identify",
         lambda emb, face: {"id": 1, "new": True, "age": 25, "gender": 1},
     )
 
-    worker_module._process_entry(
+    crossings.process_frame(
         b"1-1", {b"camera_id": str(cam.id).encode(), b"frame": _jpeg_bytes()}
     )
 
@@ -158,13 +162,13 @@ def test_process_entry_skips_faces_identified_as_employee(db_session, monkeypatc
     cam = Camera(name="A", url="rtsp://a", direction="in")
     db_session.add(cam)
     db_session.commit()
-    worker_module._reload_cameras()
+    camera_cache.reload_cameras()
 
     fake_face = _FakeFace(np.random.rand(512).astype(np.float32))
-    monkeypatch.setattr(worker_module, "extract_faces", lambda frame: [fake_face])
-    monkeypatch.setattr(worker_module.storage, "identify", lambda emb, face: None)
+    monkeypatch.setattr(crossings, "extract_faces", lambda frame: [fake_face])
+    monkeypatch.setattr(crossings.storage, "identify", lambda emb, face: None)
 
-    worker_module._process_entry(
+    crossings.process_frame(
         b"1-1", {b"camera_id": str(cam.id).encode(), b"frame": _jpeg_bytes()}
     )
 
@@ -176,29 +180,28 @@ def test_process_entry_respects_cooldown_for_repeated_face(db_session, monkeypat
     cam = Camera(name="A", url="rtsp://a", direction="in")
     db_session.add(cam)
     db_session.commit()
-    worker_module._reload_cameras()
+    camera_cache.reload_cameras()
 
     fake_face = _FakeFace(np.random.rand(512).astype(np.float32))
-    monkeypatch.setattr(worker_module, "extract_faces", lambda frame: [fake_face])
+    monkeypatch.setattr(crossings, "extract_faces", lambda frame: [fake_face])
     monkeypatch.setattr(
-        worker_module.storage, "identify",
+        crossings.storage, "identify",
         lambda emb, face: {"id": 7, "new": False, "age": 25, "gender": 1},
     )
 
     entry = {b"camera_id": str(cam.id).encode(), b"frame": _jpeg_bytes()}
-    worker_module._process_entry(b"1-1", entry)
-    worker_module._process_entry(b"1-2", entry)  # тот же человек, сразу же
+    crossings.process_frame(b"1-1", entry)
+    crossings.process_frame(b"1-2", entry)  # тот же человек, сразу же
 
     from db.models import CrossingEvent
     assert db_session.query(CrossingEvent).count() == 1  # второй раз — cooldown
 
 
-# ── ежедневный сброс persons (_seconds_until_next_persons_reset /
-#    _run_persons_reset_once) ────────────────────────────────────────────────
+# ── ежедневный сброс persons (seconds_until_next_reset / run_once) ────────────────────────────────────────────────
 
 def test_seconds_until_next_reset_is_within_24h_and_positive(db_session):
     svc.get_settings(db_session)  # park_settings.timezone по умолчанию UTC
-    seconds = worker_module._seconds_until_next_persons_reset()
+    seconds = persons_reset.seconds_until_next_reset()
     assert 0 < seconds <= 24 * 3600
 
 
@@ -209,7 +212,7 @@ def test_run_persons_reset_once_clears_persons_table(db_session):
     db_session.commit()
     assert db_session.query(Person).count() == 2
 
-    worker_module._run_persons_reset_once()
+    persons_reset.run_once()
 
     assert db_session.query(Person).count() == 0
 
@@ -221,11 +224,11 @@ def test_run_persons_reset_once_is_a_noop_for_second_replica_same_day(db_session
     db_session.add(Person(embedding=b"\x00" * 8, age=30, gender=1))
     db_session.commit()
 
-    worker_module._run_persons_reset_once()  # "первая реплика" — реально чистит
+    persons_reset.run_once()  # "первая реплика" — реально чистит
     db_session.add(Person(embedding=b"\x02" * 8, age=40, gender=1))
     db_session.commit()
 
-    worker_module._run_persons_reset_once()  # "вторая реплика" — лок уже занят
+    persons_reset.run_once()  # "вторая реплика" — лок уже занят
 
     # Лицо, добавленное ПОСЛЕ первого сброса, должно остаться нетронутым.
     assert db_session.query(Person).count() == 1
@@ -239,11 +242,11 @@ def test_run_persons_reset_once_releases_lock_on_error(db_session, monkeypatch):
     def _boom(session):
         raise RuntimeError("db is down")
 
-    monkeypatch.setattr(worker_module, "reset_persons", _boom)
+    monkeypatch.setattr(persons_reset.stats_service, "reset_persons", _boom)
 
-    worker_module._run_persons_reset_once()
+    persons_reset.run_once()
 
-    tz = worker_module._park_timezone()
+    tz = persons_reset.park_timezone()
     today = datetime.now(tz).date().isoformat()
-    lock_key = f"{worker_module.PERSONS_RESET_LOCK_KEY}:{today}"
-    assert worker_module.r.exists(lock_key) == 0
+    lock_key = persons_reset.lock_key_for(today)
+    assert redis_conn.r.exists(lock_key) == 0

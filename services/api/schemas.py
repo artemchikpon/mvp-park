@@ -1,11 +1,21 @@
+from datetime import datetime
+from typing import Literal, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from pydantic import BaseModel, field_validator, model_validator
-from typing import Optional, Literal
-from datetime import datetime, date
 
 
 # ── Cameras ──────────────────────────────────────────────────────────────────
 
 Direction = Literal["in", "out"]
+
+
+def _strip_non_empty_url(v: str | None) -> str | None:
+    if v is None:
+        return None
+    if not v.strip():
+        raise ValueError("url не может быть пустым")
+    return v.strip()
 
 
 class CameraCreate(BaseModel):
@@ -15,12 +25,7 @@ class CameraCreate(BaseModel):
     gate: Optional[str] = None    # группа/точка, напр. "Центральный", "Второй (МОРЕ)"
     active: bool = True
 
-    @field_validator("url")
-    @classmethod
-    def url_not_empty(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("url не может быть пустым")
-        return v.strip()
+    _url = field_validator("url")(_strip_non_empty_url)
 
 
 class CameraUpdate(BaseModel):
@@ -30,15 +35,7 @@ class CameraUpdate(BaseModel):
     gate: Optional[str] = None
     active: Optional[bool] = None
 
-    @field_validator("url")
-    @classmethod
-    def url_not_empty(cls, v: str | None) -> str | None:
-        if v is None:
-            return None
-        if not v.strip():
-            raise ValueError("url не может быть пустым")
-        return v.strip()
-
+    _url = field_validator("url")(_strip_non_empty_url)
 
 
 class CameraOut(BaseModel):
@@ -149,7 +146,6 @@ class ParkSettingsUpdate(BaseModel):
         if not value:
             raise ValueError("timezone не может быть пустым")
         try:
-            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
             ZoneInfo(value)
         except (ZoneInfoNotFoundError, ValueError):
             raise ValueError(f"Невалидная timezone: {value}")
@@ -173,3 +169,28 @@ class PersonOut(BaseModel):
     last_seen: Optional[datetime]
 
     model_config = {"from_attributes": True}
+
+
+# ── Employees ─────────────────────────────────────────────────────────────────
+
+class EmployeeOut(BaseModel):
+    id: int
+    external_id: Optional[int]
+    first_name: str
+    file_id: Optional[int]
+    created_at: Optional[datetime]
+
+    model_config = {"from_attributes": True}
+
+
+class AddEmployeeRequest(BaseModel):
+    first_name: str
+    file_id: int
+    external_id: Optional[int] = None
+
+
+class SyncResult(BaseModel):
+    added: int
+    updated: int
+    skipped: int
+    errors: int

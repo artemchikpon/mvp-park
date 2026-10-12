@@ -1,5 +1,3 @@
-
-
 import os
 import sys
 import types
@@ -12,9 +10,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # ── 1. sys.path, как в Docker-образах ───────────────────────────────────────
 for p in (
-    REPO_ROOT / "shared",              # -> `db` package
-    REPO_ROOT / "services",            # -> `api` package (services/api/__init__.py)
-    REPO_ROOT / "services" / "worker", # -> worker.py, face_engine.py, employee_sync.py как top-level модули
+    REPO_ROOT / "shared",                # -> пакеты `db`, `core`
+    REPO_ROOT / "services",              # -> `api` package (services/api/__init__.py)
+    REPO_ROOT / "services" / "worker",   # -> модули воркера как top-level (как в образе)
+    REPO_ROOT / "services" / "producer", # -> camera.py
 ):
     sys.path.insert(0, str(p))
 
@@ -41,7 +40,7 @@ os.environ.setdefault("DATABASE_URL", f"sqlite:///{_tmp_db_path}")
 os.environ.setdefault("API_KEYS", "test-key-1,test-key-2")
 
 from db.database import Base, engine, SessionLocal  # noqa: E402
-from db import models  # noqa: E402  (регистрирует все таблицы в Base.metadata)
+from db import models  # noqa: E402,F401  (регистрирует все таблицы в Base.metadata)
 
 
 @pytest.fixture()

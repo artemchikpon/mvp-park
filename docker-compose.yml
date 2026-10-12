@@ -1,5 +1,25 @@
 version: "3.9"
 
+# Общие настройки, переиспользуемые сервисами через YAML-якоря.
+x-db-env: &db-env
+  DATABASE_URL: postgresql://face:face@postgres:5432/face_db
+
+x-app-env: &app-env
+  <<: *db-env
+  REDIS_HOST: redis
+
+x-hr-env: &hr-env
+  HR_API_BASE: "https://central-park.rzbtech.uz"
+  HR_SSL_VERIFY: "true"
+
+x-app-depends: &app-depends
+  postgres:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  migrator:
+    condition: service_completed_successfully
+
 services:
 
   redis:
@@ -20,7 +40,6 @@ services:
       POSTGRES_DB: face_db
     volumes:
       - pgdata:/var/lib/postgresql/data
-
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U face -d face_db" ]
       interval: 5s
@@ -33,7 +52,7 @@ services:
       context: .
       dockerfile: shared/Dockerfile
     environment:
-      DATABASE_URL: postgresql://face:face@postgres:5432/face_db
+      <<: *db-env
     depends_on:
       postgres:
         condition: service_healthy
@@ -46,10 +65,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://face:face@postgres:5432/face_db
-      REDIS_HOST: redis
-      HR_API_BASE: "https://central-park.rzbtech.uz"
-      HR_SSL_VERIFY: "true"
+      <<: [*app-env, *hr-env]
       ENABLE_DOCS: "true"
       # CORS_ORIGINS можно передать через .env, например:
       # https://dashboard.example.com,https://admin.example.com
@@ -59,13 +75,7 @@ services:
       API_KEYS: "${API_KEYS:?Задайте API_KEYS в .env — см. auth.py}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      migrator:
-        condition: service_completed_successfully
+    depends_on: *app-depends
     restart: unless-stopped
 
   producer:
@@ -73,15 +83,8 @@ services:
       context: .
       dockerfile: services/producer/Dockerfile
     environment:
-      DATABASE_URL: postgresql://face:face@postgres:5432/face_db
-      REDIS_HOST: redis
-    depends_on:
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-      migrator:
-        condition: service_completed_successfully
+      <<: *app-env
+    depends_on: *app-depends
     restart: unless-stopped
 
   worker:
@@ -89,22 +92,13 @@ services:
       context: .
       dockerfile: services/worker/Dockerfile
     environment:
-      DATABASE_URL: postgresql://face:face@postgres:5432/face_db
-      REDIS_HOST: redis
+      <<: [*app-env, *hr-env]
       CROSSING_COOLDOWN_SECONDS: "60"
       PERSONS_RESET_HOUR: "12"
       PERSONS_RESET_MINUTE: "0"
-      HR_API_BASE: "https://central-park.rzbtech.uz"
-      HR_SSL_VERIFY: "true"
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    depends_on:
-      redis:
-        condition: service_healthy
-      postgres:
-        condition: service_healthy
-      migrator:
-        condition: service_completed_successfully
+    depends_on: *app-depends
     restart: unless-stopped
     deploy:
       replicas: 2

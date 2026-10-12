@@ -18,7 +18,6 @@ redis
 numpy
 scikit-learn
 opencv-python-headless
-Pillow
 
 pytest>=8.0
 fakeredis>=2.20

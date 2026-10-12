@@ -10,12 +10,13 @@ API_KEYS (через запятую, можно несколько — напр�
 а падает с понятной ошибкой (fail secure, а не fail open).
 """
 
-import os
 import secrets
+
 from fastapi import Header, HTTPException, status
 
-_raw = os.environ.get("API_KEYS", "")
-API_KEYS = {k.strip() for k in _raw.split(",") if k.strip()}
+from core.env import env_list
+
+API_KEYS = set(env_list("API_KEYS"))
 
 if not API_KEYS:
     raise RuntimeError(

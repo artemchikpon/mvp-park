@@ -4,7 +4,6 @@ employees.py тестируется отдельно (там больше вне
 face_engine), см. test_api_employees.py.
 """
 
-import pytest
 
 from db.models import Person
 

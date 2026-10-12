@@ -1,24 +1,22 @@
+from datetime import date
+from typing import Optional
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from typing import Optional
-from datetime import date
 
-from db.database import SessionLocal
-from db import stats_service as svc
+from api.deps import get_db
 from api.schemas import (
-    LiveOccupancyOut, DayTimeseriesOut, WeekTimeseriesOut,
-    MonthTimeseriesOut, DemographicsOut, DashboardOut,
+    DashboardOut, DayTimeseriesOut, DemographicsOut, LiveOccupancyOut,
+    MonthTimeseriesOut, WeekTimeseriesOut,
 )
+from db import stats_service as svc
 
 router = APIRouter(prefix="/stats", tags=["stats"])
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+
+def _day_or_today(db: Session, day: Optional[date]) -> date:
+    return day or svc.current_park_date(db)
 
 
 @router.get("/live", response_model=LiveOccupancyOut,
@@ -37,7 +35,7 @@ def day(
     gate: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    return svc.get_day_timeseries(db, day or svc.current_park_date(db), gate=gate)
+    return svc.get_day_timeseries(db, _day_or_today(db, day), gate=gate)
 
 
 @router.get("/week", response_model=WeekTimeseriesOut,
@@ -47,7 +45,7 @@ def week(
     gate: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    return svc.get_week_timeseries(db, day or svc.current_park_date(db), gate=gate)
+    return svc.get_week_timeseries(db, _day_or_today(db, day), gate=gate)
 
 
 @router.get("/month", response_model=MonthTimeseriesOut,
@@ -57,7 +55,7 @@ def month(
     gate: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    return svc.get_month_timeseries(db, day or svc.current_park_date(db), gate=gate)
+    return svc.get_month_timeseries(db, _day_or_today(db, day), gate=gate)
 
 
 @router.get("/demographics", response_model=DemographicsOut,
@@ -68,7 +66,7 @@ def demographics(
     gate: Optional[str] = Query(None),
     db: Session = Depends(get_db),
 ):
-    start_utc, end_utc = svc.period_bounds(db, period, day or svc.current_park_date(db))
+    start_utc, end_utc = svc.period_bounds(db, period, _day_or_today(db, day))
     return svc.get_demographics(db, start_utc, end_utc, gate=gate)
 
 
@@ -79,4 +77,4 @@ def dashboard(
     gate: Optional[str] = Query(None, description="Фильтр по конкретной точке Вход/Выход"),
     db: Session = Depends(get_db),
 ):
-    return svc.get_dashboard(db, day or svc.current_park_date(db), gate=gate)
+    return svc.get_dashboard(db, _day_or_today(db, day), gate=gate)

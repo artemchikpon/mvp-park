@@ -14,7 +14,8 @@ pytest -v
   `tests/test_worker.py`).
 - **insightface/onnxruntime** — не устанавливаются и не импортируются;
   `tests/conftest.py` подменяет модуль `face_engine` лёгкой заглушкой ещё
-  до первого импорта `worker.py`/`employee_sync.py`.
+  до первого импорта модулей воркера.
+- **HR API** — сетевые функции `employee_sync` подменяются через monkeypatch.
 
 ## Что покрыто
 
@@ -23,20 +24,20 @@ pytest -v
 | `test_stats_service.py` | Бизнес-логика аналитики: Live Occupancy, графики день/неделя/месяц, демография, группировка по возрасту, санитизация некорректных age/gender, ежедневный сброс галереи лиц (`reset_persons`) |
 | `test_auth.py` | API-key авторизация (`require_api_key`) — юнит + через реальные роуты |
 | `test_api_cameras_settings_persons.py` | CRUD камер, настройки парка, список/счётчик/ручной сброс (`POST /persons/reset`) уникальных лиц — через `TestClient` |
-| `test_worker.py` | Cooldown-дедупликация пересечений, кэш камер, сквозная обработка кадра `_process_entry` (кадр из Redis → событие в БД), ежедневный сброс `persons` (`_persons_reset_loop` и Redis-лок против двойного удаления двумя репликами) |
+| `test_api_employees.py` | Роутер `/employees`: список, удаление, `sync`/`add` через Redis-очередь (успех, ошибка воркера → 422/500/502, таймаут → 504) и обработка этих задач на стороне воркера (`employee_jobs`) |
+| `test_employee_sync.py` | Синхронизация с HR: добавление/обновление по `external_id`, подсчёт skipped/errors, тексты ошибок, на которые опирается API |
+| `test_worker.py` | Cooldown-дедупликация пересечений (`crossings`), кэш камер (`camera_cache`), сквозная обработка кадра `process_frame` (кадр из Redis → событие в БД), ежедневный сброс `persons` (`persons_reset`, Redis-лок против двойного удаления двумя репликами) |
+| `test_producer.py` | Управление потоками камер: старт новых, остановка удалённых, перезапуск при смене URL или падении потока |
 | `test_face_storage.py` | Сопоставление лиц по cosine similarity, фильтрация сотрудников, выбор лучшего совпадения при нескольких похожих |
 | `test_schemas.py` | Pydantic-валидаторы (`CameraCreate`, `ParkSettingsUpdate`) |
 
 ## Чего здесь нет (и почему)
 
-- **producer/camera.py** — по сути тонкая обёртка над `cv2.VideoCapture` в
-  бесконечном цикле; юнит-тестировать особо нечего без реальной RTSP-камеры
-  или сложного мокания OpenCV. Если появится логика троттлинга FPS
-  (см. список проблем проекта) — стоит добавить тесты на неё отдельно.
-- **employee_sync.py** — сетевые вызовы к внешнему HR API; для нормального
-  покрытия нужен `respx`/`httpx_mock` и более детальные фикстуры под формат
-  ответа HR API. Можно добавить отдельным заходом.
-- **Реальный consumer-group flow воркера** (`_main_loop`, `main()`) — это
+- **Захват RTSP** (`producer/camera.py: stream_camera`) — тонкая обёртка над
+  `cv2.VideoCapture`; без реальной камеры тестировать особо нечего.
+- **HTTP-уровень HR API** (`_fetch_employees`, `_fetch_photo_as_frame`) —
+  для покрытия нужен `respx`/`httpx_mock`.
+- **Реальный consumer-group flow воркера** (`stream_consumer`, `worker.main()`) — это
   бесконечные циклы с реальными сетевыми вызовами к Redis; их лучше
   проверять integration-тестом с поднятым `docker-compose` (или
   `testcontainers`), а не юнит-тестом.

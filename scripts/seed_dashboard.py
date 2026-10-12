@@ -1,97 +1,35 @@
 #!/usr/bin/env python3
 """
-Скрипт для заполнения БД тестовыми данными для дашбордов MVP Park.
+Заполняет БД тестовыми данными для дашбордов MVP Park.
 
 Что создаётся:
   - Настройки парка (ParkSettings)
-  - 6 камер (3 входа, 3 выхода, 2 ворот)
+  - 6 камер (3 входа, 3 выхода, 3 точки)
   - 500 уникальных персон (Person) с возрастом и полом
   - ~15 000 событий CrossingEvent за последние 30 дней
     с реалистичным суточным профилем посещаемости
 
-Запуск:
-  # Против контейнера из docker-compose:
-  DATABASE_URL=postgresql://face:face@localhost:5432/face_db python seed_dashboard.py
-
-  # Или напрямую если postgres доступен по умолчанию:
-  python seed_dashboard.py
+Запуск из корня репозитория (Postgres из docker-compose проброшен на localhost):
+  DATABASE_URL=postgresql://face:face@localhost:5432/face_db python scripts/seed_dashboard.py
 """
 
 import os
 import random
 import struct
-from datetime import datetime, timedelta, timezone, date, time
+import sys
+from datetime import date, datetime, time, timedelta
+from pathlib import Path
 
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy import (
-    Column, Integer, String, Date, DateTime, LargeBinary,
-    Boolean, Text, ForeignKey, Index, CheckConstraint,
-)
-from sqlalchemy.orm import relationship
+# Скрипт запускается вне контейнеров: подключаем shared/ (пакеты db, core)
+# и по умолчанию смотрим на локальный Postgres.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "shared"))
+os.environ.setdefault("DATABASE_URL", "postgresql://face:face@localhost:5432/face_db")
 
-# ── Подключение к БД ──────────────────────────────────────────────────────────
+from sqlalchemy import text  # noqa: E402
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://face:face@localhost:5432/face_db"
-)
-
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-SessionLocal = sessionmaker(bind=engine)
-Base = declarative_base()
-
-# ── Модели (копия из shared/db/models.py, чтобы скрипт был standalone) ───────
-
-class Camera(Base):
-    __tablename__ = "cameras"
-    id = Column(Integer, primary_key=True)
-    name = Column(String(128), nullable=False)
-    url = Column(Text, nullable=False)
-    direction = Column(String(3), nullable=False)
-    gate = Column(String(128), nullable=True)
-    active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    __table_args__ = (
-        CheckConstraint("direction in ('in','out')", name="ck_camera_direction"),
-    )
-
-
-class Person(Base):
-    __tablename__ = "persons"
-    id = Column(Integer, primary_key=True)
-    embedding = Column(LargeBinary, nullable=False)
-    age = Column(Integer)
-    gender = Column(Integer)
-    first_seen = Column(DateTime, default=datetime.utcnow)
-    last_seen = Column(DateTime, default=datetime.utcnow)
-
-
-class CrossingEvent(Base):
-    __tablename__ = "crossing_events"
-    id = Column(Integer, primary_key=True)
-    camera_id = Column(Integer, ForeignKey("cameras.id"), nullable=False)
-    direction = Column(String(3), nullable=False)
-    gate = Column(String(128), nullable=True)
-    person_id = Column(Integer, ForeignKey("persons.id"), nullable=True)
-    age = Column(Integer, nullable=True)
-    gender = Column(Integer, nullable=True)
-    ts = Column(DateTime, default=datetime.utcnow, nullable=False)
-    __table_args__ = (
-        CheckConstraint("direction in ('in','out')", name="ck_event_direction"),
-        Index("ix_crossing_events_ts", "ts"),
-        Index("ix_crossing_events_camera_ts", "camera_id", "ts"),
-        Index("ix_crossing_events_direction_ts", "direction", "ts"),
-    )
-
-
-class ParkSettings(Base):
-    __tablename__ = "park_settings"
-    id = Column(Integer, primary_key=True)
-    capacity = Column(Integer, nullable=False, default=5000)
-    warning_threshold = Column(Integer, nullable=False, default=4500)
-    timezone = Column(String(64), nullable=False, default="UTC")
-    updated_at = Column(DateTime, default=datetime.utcnow)
+from core.timeutil import utcnow  # noqa: E402
+from db.database import SessionLocal  # noqa: E402
+from db.models import Camera, CrossingEvent, ParkSettings, Person  # noqa: E402
 
 
 # ── Вспомогательные функции ────────────────────────────────────────────────────
@@ -153,7 +91,7 @@ def seed():
                 capacity=5000,
                 warning_threshold=4500,
                 timezone="Asia/Tashkent",
-                updated_at=datetime.utcnow(),
+                updated_at=utcnow(),
             ))
             db.commit()
             print("  Создано.")
@@ -203,8 +141,8 @@ def seed():
         else:
             persons = db.query(Person).all()
             to_create = NUM_PERSONS - len(persons)
-            base_dt = datetime.utcnow() - timedelta(days=60)
-            for i in range(to_create):
+            base_dt = utcnow() - timedelta(days=60)
+            for _ in range(to_create):
                 age = weighted_age()
                 gender = random.choice([0, 1])
                 first = base_dt + timedelta(days=random.randint(0, 59))

@@ -6,7 +6,7 @@
 import numpy as np
 import pytest
 
-from face_storage_pg import FaceStoragePG, SIMILARITY
+from face_storage_pg import FaceStoragePG
 from db.models import Person, Employee
 
 
