@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Boolean, CheckConstraint, Column, DateTime, ForeignKey, Index, Integer,
-    LargeBinary, String, Text,
+    LargeBinary, String, Text, true,
 )
 from sqlalchemy.orm import relationship
 
@@ -18,7 +18,7 @@ class Camera(Base):
     url = Column(Text, nullable=False)                  # rtsp://...
     direction = Column(String(3), nullable=False)       # 'in' | 'out'
     gate = Column(String(128), nullable=True)           # "Центральный", "Второй (МОРЕ)" ...
-    active = Column(Boolean, default=True)
+    active = Column(Boolean, default=True, nullable=False, server_default=true())
     created_at = Column(DateTime, default=utcnow)
 
     __table_args__ = (
@@ -59,6 +59,7 @@ class CrossingEvent(Base):
         Index("ix_crossing_events_ts", "ts"),
         Index("ix_crossing_events_camera_ts", "camera_id", "ts"),
         Index("ix_crossing_events_direction_ts", "direction", "ts"),
+        Index("ix_crossing_events_person_ts", "person_id", "ts"),  # миграция 006
     )
 
 
@@ -72,6 +73,10 @@ class Employee(Base):
     file_id = Column(Integer, nullable=True)
     embedding = Column(LargeBinary, nullable=False)
     created_at = Column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        Index("ix_employees_external_id", "external_id"),  # миграция 005
+    )
 
 
 class ParkSettings(Base):

@@ -81,3 +81,11 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
 pytest -q
 ```
+
+Новая миграция (модели в `shared/db/models.py` синхронизированы со схемой,
+поэтому autogenerate на актуальной БД даёт пустую миграцию):
+
+```bash
+cd shared && DATABASE_URL=postgresql://face:face@localhost:5432/face_db \
+  PYTHONPATH=. alembic revision --autogenerate -m "описание"
+```
