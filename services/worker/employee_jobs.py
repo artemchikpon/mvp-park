@@ -18,11 +18,16 @@ from core.redis_keys import (
     EMPLOYEE_ADD_JOBS, EMPLOYEE_ADD_RESULT_PREFIX, EMPLOYEE_SYNC_JOBS,
     EMPLOYEE_SYNC_RESULT_PREFIX, result_key,
 )
-from worker_config import EMPLOYEE_JOB_RESULT_TTL
+from worker_config import EMPLOYEE_JOB_RESULT_TTL, SOCK_TIMEOUT
 
 log = logging.getLogger("worker")
 
-POLL_TIMEOUT_S = 5
+# Сколько секунд BLPOP ждёт задачу на стороне Redis. Должно быть заметно
+# меньше таймаута сокета (SOCK_TIMEOUT), иначе клиент оборвёт чтение раньше,
+# чем Redis успеет ответить "задач нет", и получит TimeoutError.
+POLL_TIMEOUT_S = 2
+RETRY_DELAY_S = 2
+assert POLL_TIMEOUT_S < SOCK_TIMEOUT
 
 
 def _parse_payload(raw: bytes) -> dict:
@@ -74,16 +79,31 @@ def handle_job(queue: str, raw_payload: bytes) -> None:
         log.error(f"[employee_sync_listener] Не удалось записать результат job_id={job_id}: {e}")
 
 
+def poll_once(queues: list[str]) -> None:
+    """Ждёт одну задачу (до POLL_TIMEOUT_S) и выполняет её.
+
+    Сетевые ошибки Redis (обрыв соединения, таймаут чтения) не пробрасываются:
+    логируем и даём listen_loop повторить попытку.
+    """
+    try:
+        job = redis_conn.r.blpop(queues, timeout=POLL_TIMEOUT_S)
+    except (redis.exceptions.ConnectionError, redis.exceptions.TimeoutError) as e:
+        log.warning(f"[employee_listener] Redis connection lost: {e}, retrying in {RETRY_DELAY_S}s...")
+        time.sleep(RETRY_DELAY_S)
+        return
+    if job is None:
+        return
+    queue_raw, payload_raw = job
+    handle_job(queue_raw.decode(), payload_raw)
+
+
 def listen_loop() -> None:
+    """Бесконечный цикл приёма задач. Поток не должен умирать: любая
+    неожиданная ошибка логируется, и цикл продолжается."""
     queues = list(_HANDLERS)
     while True:
         try:
-            job = redis_conn.r.blpop(queues, timeout=POLL_TIMEOUT_S)
-        except redis.exceptions.ConnectionError as e:
-            log.warning(f"[employee_listener] Redis connection lost: {e}, retrying in 2s...")
-            time.sleep(2)
-            continue
-        if job is None:
-            continue
-        queue_raw, payload_raw = job
-        handle_job(queue_raw.decode(), payload_raw)
+            poll_once(queues)
+        except Exception:
+            log.exception(f"[employee_listener] Неожиданная ошибка, повтор через {RETRY_DELAY_S}s")
+            time.sleep(RETRY_DELAY_S)

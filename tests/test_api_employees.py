@@ -147,3 +147,55 @@ def test_worker_replies_with_error_and_accepts_legacy_plain_job_id(worker_redis,
 
     reply = json.loads(worker_redis.lpop(result_key(EMPLOYEE_SYNC_RESULT_PREFIX, "legacy-id")))
     assert reply == {"error": "HR down"}
+
+
+# ── устойчивость listener к ошибкам Redis ───────────────────────────────────
+
+def test_poll_timeout_is_shorter_than_socket_timeout():
+    """Иначе клиент обрывает BLPOP по таймауту сокета раньше, чем Redis
+    ответит "задач нет" (TimeoutError на каждом пустом цикле)."""
+    import worker_config
+    assert employee_jobs.POLL_TIMEOUT_S < worker_config.SOCK_TIMEOUT
+
+
+@pytest.mark.parametrize("error", [
+    __import__("redis").exceptions.TimeoutError("Timeout reading from socket"),
+    __import__("redis").exceptions.ConnectionError("Connection refused"),
+])
+def test_poll_once_survives_redis_network_errors(monkeypatch, error):
+    class _Boom:
+        def blpop(self, *a, **kw):
+            raise error
+
+    monkeypatch.setattr(redis_conn, "r", _Boom())
+    monkeypatch.setattr(employee_jobs.time, "sleep", lambda s: None)
+    employee_jobs.poll_once([EMPLOYEE_SYNC_JOBS])  # не должно бросать
+
+
+def test_listener_keeps_working_after_timeout(worker_redis, monkeypatch):
+    """Сценарий из прода: первый BLPOP падает с TimeoutError, следующий
+    получает задачу — она должна быть обработана, а не потеряна вместе
+    с умершим потоком."""
+    import redis as redis_lib
+
+    calls = {"n": 0}
+    real_blpop = worker_redis.blpop
+
+    def flaky_blpop(keys, timeout=0):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise redis_lib.exceptions.TimeoutError("Timeout reading from socket")
+        return real_blpop(keys, timeout=timeout)
+
+    monkeypatch.setattr(worker_redis, "blpop", flaky_blpop)
+    monkeypatch.setattr(employee_jobs.time, "sleep", lambda s: None)
+    monkeypatch.setattr(employee_jobs.employee_sync, "sync_employees",
+                        lambda: {"added": 0, "updated": 0, "skipped": 0, "errors": 0})
+    worker_redis.rpush(EMPLOYEE_SYNC_JOBS, json.dumps({"job_id": "j2"}))
+
+    queues = [EMPLOYEE_SYNC_JOBS, EMPLOYEE_ADD_JOBS]
+    employee_jobs.poll_once(queues)  # TimeoutError — пережили
+    employee_jobs.poll_once(queues)  # задача обработана
+
+    reply = worker_redis.lpop(result_key(EMPLOYEE_SYNC_RESULT_PREFIX, "j2"))
+    assert json.loads(reply)["added"] == 0
