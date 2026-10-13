@@ -71,6 +71,7 @@ DATABASE_URL=postgresql://face:face@localhost:5432/face_db python scripts/seed_d
 | `EMPLOYEE_SYNC_TIMEOUT` | api | `120` | сколько ждать ответа воркера, сек |
 | `HR_API_BASE` / `HR_SSL_VERIFY` | worker | — / `true` | HR-система с сотрудниками |
 | `HR_EMPLOYEES_PAGE_LIMIT` | worker | `100` | размер страницы HR API |
+| `PRODUCER_MAX_FPS` | producer | `5` | максимум кадров в секунду с одной камеры в Redis; `0` — без ограничения |
 | `CROSSING_COOLDOWN_SECONDS` | worker | `60` | анти-дубль одного человека на одной камере |
 | `PERSONS_RESET_HOUR` / `_MINUTE` | worker | `12` / `0` | время ежедневной очистки `persons` (таймзона парка) |
 

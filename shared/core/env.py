@@ -13,6 +13,10 @@ def env_int(name: str, default: int) -> int:
     return int(os.environ.get(name, str(default)))
 
 
+def env_float(name: str, default: float) -> float:
+    return float(os.environ.get(name, str(default)))
+
+
 def env_bool(name: str, default: bool) -> bool:
     """Любое значение, кроме false/0/no (без учёта регистра и пробелов), — True."""
     raw = os.environ.get(name)

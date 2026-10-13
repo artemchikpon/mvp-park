@@ -84,6 +84,8 @@ services:
       dockerfile: services/producer/Dockerfile
     environment:
       <<: *app-env
+      # Не больше N кадров в секунду с каждой камеры в Redis (0 — без ограничения)
+      PRODUCER_MAX_FPS: "${PRODUCER_MAX_FPS:-5}"
     depends_on: *app-depends
     restart: unless-stopped
 
