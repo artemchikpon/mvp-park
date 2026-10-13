@@ -5,6 +5,7 @@
 """
 
 import logging
+import time
 import uuid
 from collections import Counter
 
@@ -14,6 +15,7 @@ import redis
 
 import camera_cache
 import redis_conn
+from core import perf
 from core.redis_keys import CROSSING_COOLDOWN_PREFIX
 from db.stats_service import log_crossing
 from face_engine import extract_faces
@@ -25,6 +27,8 @@ log = logging.getLogger("worker")
 # FaceStoragePG ничего не подключает в конструкторе (сессии открываются
 # лениво внутри identify()), поэтому безопасно создавать на уровне модуля.
 storage = FaceStoragePG()
+
+stats = perf.get("worker")
 
 _RELEASE_IF_OWNER = """
 if redis.call('get', KEYS[1]) == ARGV[1] then
@@ -91,12 +95,16 @@ def _count_face(camera: camera_cache.CameraInfo, face) -> str:
     res = storage.identify(face.embedding, face)
     if res is None:  # сотрудник
         log.debug("Лицо сотрудника — пропускаем")
+        stats.count("employees_seen")
         return SKIPPED
+    if res["new"]:
+        stats.count("new_persons")
 
     person_id = res["id"]
-    if already_counted_recently(camera.id, person_id, reserve=False):
-        return SKIPPED
-    token = reserve_cooldown(camera.id, person_id)
+    with stats.measure("redis_cooldown"):
+        if already_counted_recently(camera.id, person_id, reserve=False):
+            return SKIPPED
+        token = reserve_cooldown(camera.id, person_id)
     if token is None:
         return SKIPPED
 
@@ -105,7 +113,10 @@ def _count_face(camera: camera_cache.CameraInfo, face) -> str:
     age = int(face.age) if face.age is not None else None
     gender = int(face.gender) if face.gender is not None else None
 
-    if log_crossing(camera, person_id, age, gender):
+    with stats.measure("db_event"):
+        recorded = log_crossing(camera, person_id, age, gender)
+    if recorded:
+        stats.count("crossings")
         return COUNTED
     # БД не приняла событие: снимаем cooldown, чтобы следующий кадр мог
     # повторить запись.
@@ -113,8 +124,23 @@ def _count_face(camera: camera_cache.CameraInfo, face) -> str:
     return FAILED
 
 
+def _queue_wait_s(message_id: bytes) -> float | None:
+    """Сколько кадр ждал в очереди: ID сообщения Redis Stream начинается с
+    времени добавления в миллисекундах ("1791804601170-0")."""
+    try:
+        added_ms = int(message_id.split(b"-", 1)[0])
+    except (ValueError, AttributeError):
+        return None
+    return max(time.time() - added_ms / 1000, 0.0)
+
+
 def process_frame(message_id: bytes, data: dict) -> None:
     """Обрабатывает одно сообщение из стрима кадров."""
+    started = time.monotonic()
+    wait = _queue_wait_s(message_id)
+    if wait is not None:
+        stats.observe("queue_wait", wait)
+
     camera_id_raw = data.get(b"camera_id")
     if camera_id_raw is None:
         log.warning("Frame without camera_id, skipping")
@@ -126,9 +152,16 @@ def process_frame(message_id: bytes, data: dict) -> None:
         log.warning(f"Unknown camera_id={camera_id}, skipping frame")
         return
 
-    faces = extract_faces(_decode_frame(data))
+    with stats.measure("decode"):
+        frame = _decode_frame(data)
+    with stats.measure("model"):
+        faces = extract_faces(frame)
 
     outcomes = Counter(_count_face(camera, f) for f in faces if f.embedding is not None)
+
+    stats.count("frames")
+    stats.count("faces", len(faces))
+    stats.observe("frame_total", time.monotonic() - started)
 
     log.info(
         f"Cam {camera_id} ({camera.direction}) | faces={len(faces)} "

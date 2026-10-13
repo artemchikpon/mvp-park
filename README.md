@@ -71,6 +71,7 @@ DATABASE_URL=postgresql://face:face@localhost:5432/face_db python scripts/seed_d
 | `EMPLOYEE_SYNC_TIMEOUT` | api | `120` | сколько ждать ответа воркера, сек |
 | `HR_API_BASE` / `HR_SSL_VERIFY` | worker | — / `true` | HR-система с сотрудниками |
 | `HR_EMPLOYEES_PAGE_LIMIT` | worker | `100` | размер страницы HR API |
+| `PERF_LOG_INTERVAL` | worker, producer | `30` | раз в N секунд писать в лог сводку `[perf ...]`: время шагов, CPU процесса, кадры/с; `0` — выключить |
 | `PRODUCER_MAX_FPS` | producer | `5` | максимум кадров в секунду с одной камеры в Redis; `0` — без ограничения |
 | `CROSSING_COOLDOWN_SECONDS` | worker | `60` | анти-дубль одного человека на одной камере |
 | `PERSONS_RESET_HOUR` / `_MINUTE` | worker | `12` / `0` | время ежедневной очистки `persons` (таймзона парка) |
@@ -90,3 +91,20 @@ pytest -q
 cd shared && DATABASE_URL=postgresql://face:face@localhost:5432/face_db \
   PYTHONPATH=. alembic revision --autogenerate -m "описание"
 ```
+
+## Замеры производительности
+
+Worker и producer раз в `PERF_LOG_INTERVAL` секунд пишут строку `[perf ...]`:
+
+```bash
+docker compose logs -f worker producer | grep perf
+```
+
+- `CPU N cores` — сколько ядер в среднем занимал процесс за интервал;
+- worker: `frames`, `faces`, `crossings`, `new_persons` (в секунду); время шагов
+  `model` (InsightFace), `match` (сравнение с галереей), `gallery_reload`
+  (перечитывание галереи из БД), `db_person`, `db_event`, `decode`,
+  `redis_cooldown` и их доля; `queue_wait` — сколько кадр ждал в очереди
+  (растёт, если воркеры не успевают); `gallery_persons` — размер галереи;
+- producer: по каждой камере `grabbed` (прочитано из потока) и `sent`
+  (отправлено в Redis) в секунду, время `retrieve`, `jpeg`, `xadd`.

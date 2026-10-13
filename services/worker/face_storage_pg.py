@@ -19,6 +19,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
+from core import perf
 from core.timeutil import utcnow
 from db.database import SessionLocal
 from db.models import Employee, Person
@@ -26,6 +27,8 @@ from embeddings import from_bytes, to_bytes
 
 SIMILARITY = 0.65
 CACHE_TTL_SECONDS = 5.0
+
+stats = perf.get("worker")
 
 
 def _lock_key(emb: np.ndarray) -> int:
@@ -69,10 +72,13 @@ class FaceStoragePG:
             if session.bind.dialect.name != "sqlite" and fresh:
                 return cls._snapshot
 
-            cls._snapshot = _Snapshot(
-                employees=tuple(from_bytes(emp.embedding) for emp in session.query(Employee).all()),
-                persons=tuple((p.id, from_bytes(p.embedding)) for p in session.query(Person).all()),
-            )
+            with stats.measure("gallery_reload"):
+                cls._snapshot = _Snapshot(
+                    employees=tuple(from_bytes(emp.embedding) for emp in session.query(Employee).all()),
+                    persons=tuple((p.id, from_bytes(p.embedding)) for p in session.query(Person).all()),
+                )
+            stats.gauge("gallery_persons", len(cls._snapshot.persons))
+            stats.gauge("gallery_employees", len(cls._snapshot.employees))
             cls._cache_loaded_at = now
             return cls._snapshot
 
@@ -88,10 +94,9 @@ class FaceStoragePG:
     # ── публичный API ─────────────────────────────────────────────────────────
 
     def is_employee(self, emb: np.ndarray, session) -> bool:
-        return any(
-            _similarity(emb, stored) >= SIMILARITY
-            for stored in self._load_snapshot(session).employees
-        )
+        employees = self._load_snapshot(session).employees
+        with stats.measure("match"):
+            return any(_similarity(emb, stored) >= SIMILARITY for stored in employees)
 
     def identify(self, emb: np.ndarray, face) -> dict | None:
         """Сопоставляет лицо с галереей.
@@ -106,7 +111,8 @@ class FaceStoragePG:
         # PostgreSQL advisory lock ниже.
         with self._local_identify_lock:
             try:
-                self._acquire_identity_lock(session, emb)
+                with stats.measure("db_person"):
+                    self._acquire_identity_lock(session, emb)
 
                 if self.is_employee(emb, session):
                     return None
@@ -124,19 +130,22 @@ class FaceStoragePG:
     # ── внутреннее ────────────────────────────────────────────────────────────
 
     def _best_person_match(self, emb: np.ndarray, session) -> int | None:
+        persons = self._load_snapshot(session).persons
         best_id = None
         best_score = 0.0
-        for person_id, stored in self._load_snapshot(session).persons:
-            score = _similarity(emb, stored)
-            if score > best_score:  # строго больше: при равенстве — первый
-                best_score = score
-                best_id = person_id
+        with stats.measure("match"):
+            for person_id, stored in persons:
+                score = _similarity(emb, stored)
+                if score > best_score:  # строго больше: при равенстве — первый
+                    best_score = score
+                    best_id = person_id
         if best_id is not None and best_score >= SIMILARITY:
             return best_id
         return None
 
     def _touch_existing(self, session, person_id: int, emb, face) -> dict:
-        p = session.get(Person, person_id)
+        with stats.measure("db_person"):
+            p = session.get(Person, person_id)
         if p is None:
             # Запись удалили (например, ежедневный сброс) после снимка кэша.
             self.invalidate_cache()
@@ -146,7 +155,8 @@ class FaceStoragePG:
         # пограничным similarity со временем слились бы в одну личность
         # из-за скользящего среднего.
         p.last_seen = utcnow()
-        session.commit()
+        with stats.measure("db_person"):
+            session.commit()
         return {"id": person_id, "new": False, "age": p.age, "gender": p.gender}
 
     def _create_person(self, session, emb, face) -> dict:
@@ -155,7 +165,8 @@ class FaceStoragePG:
         person = Person(embedding=to_bytes(emb), age=age, gender=gender)
         session.add(person)
         try:
-            session.commit()
+            with stats.measure("db_person"):
+                session.commit()
         except IntegrityError:
             # Защита от редкого race/дубликата на уровне БД: повторяем
             # поиск уже существующей записи после rollback.
@@ -163,6 +174,7 @@ class FaceStoragePG:
             self.invalidate_cache()
             return self.identify(emb, face)
 
-        session.refresh(person)
+        with stats.measure("db_person"):
+            session.refresh(person)
         self.invalidate_cache()
         return {"id": person.id, "new": True, "age": age, "gender": gender}

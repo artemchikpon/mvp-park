@@ -19,6 +19,7 @@ from dataclasses import dataclass
 import cv2
 import redis
 
+from core import perf
 from core.redis_keys import FRAMES_STREAM
 from core.env import env_float, env_int, env_str
 from core.redis_utils import wait_for_redis
@@ -35,6 +36,11 @@ REDIS_RETRY_DELAY_S = 2    # пауза, если Redis временно нед�
 
 # Максимум кадров в секунду с одной камеры в Redis. 0 — без ограничения.
 MAX_FPS = env_float("PRODUCER_MAX_FPS", 5.0)
+
+# Сводка раз в PERF_LOG_INTERVAL с: по каждой камере сколько кадров прочитано
+# (grabbed) и отправлено (sent), сколько стоят retrieve/JPEG/XADD, и сколько
+# ядер CPU занимает процесс (в т.ч. распаковка видео внутри grab()).
+stats = perf.get("producer")
 
 # Клиент создаётся напрямую, а не через core.redis_utils.make_redis: так
 # DeprecationWarning redis-py про retry_on_timeout (redis>=6) не всплывает в
@@ -96,27 +102,33 @@ def stream_camera(camera_id: int, url: str, stop_event: threading.Event) -> None
         # прошедших ограничение частоты.
         ok = cap.grab()
         if ok:
+            stats.count(f"cam{camera_id}.grabbed")
             if not limiter.ready():
                 continue
-            ok, frame = cap.retrieve()
+            with stats.measure("retrieve"):
+                ok, frame = cap.retrieve()
         if not ok:
+            stats.count(f"cam{camera_id}.read_failed")
             log.warning(f"[cam {camera_id}] Read failed, reconnecting in {RECONNECT_DELAY_S}s...")
             cap.release()
             time.sleep(RECONNECT_DELAY_S)
             cap = cv2.VideoCapture(url)
             continue
 
-        ok, buf = cv2.imencode(".jpg", frame)
+        with stats.measure("jpeg"):
+            ok, buf = cv2.imencode(".jpg", frame)
         if not ok:
             log.warning(f"[cam {camera_id}] JPEG encode failed")
             continue
 
         try:
-            r.xadd(
-                FRAMES_STREAM,
-                {"frame": buf.tobytes(), "camera_id": str(camera_id)},
-                maxlen=STREAM_MAXLEN,
-            )
+            with stats.measure("xadd"):
+                r.xadd(
+                    FRAMES_STREAM,
+                    {"frame": buf.tobytes(), "camera_id": str(camera_id)},
+                    maxlen=STREAM_MAXLEN,
+                )
+            stats.count(f"cam{camera_id}.sent")
         except redis.exceptions.RedisError as e:
             # Redis может временно исчезнуть. Поток камеры не должен умереть:
             # redis-py переподключится на следующей операции.
@@ -173,6 +185,7 @@ def sync_workers(workers: dict[int, CameraWorker], active: dict[int, str]) -> No
 def main() -> None:
     wait_for_db()
     wait_for_redis()
+    stats.start_reporter()
 
     workers: dict[int, CameraWorker] = {}
     while True:

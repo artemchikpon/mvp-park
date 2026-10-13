@@ -7,6 +7,8 @@ x-db-env: &db-env
 x-app-env: &app-env
   <<: *db-env
   REDIS_HOST: redis
+  # Сводка производительности в логах раз в N секунд (0 — выключить)
+  PERF_LOG_INTERVAL: "${PERF_LOG_INTERVAL:-30}"
 
 x-hr-env: &hr-env
   HR_API_BASE: "https://central-park.rzbtech.uz"

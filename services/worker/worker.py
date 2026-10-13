@@ -18,6 +18,7 @@ import employee_jobs
 import employee_sync
 import persons_reset
 import stream_consumer
+from core import perf
 from core.redis_utils import wait_for_redis
 from db.database import wait_for_db
 
@@ -33,6 +34,7 @@ def main() -> None:
     wait_for_db()
     wait_for_redis()
     stream_consumer.ensure_consumer_group()
+    perf.get("worker").start_reporter()
 
     camera_cache.reload_cameras()  # первичная загрузка перед стартом основного цикла
     _start_daemon(camera_cache.reload_loop, "camera-reload")
