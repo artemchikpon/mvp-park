@@ -36,7 +36,7 @@ services:
       FACE_DEVICE: gpu
       WORKER_ROLE: primary
       CROSSING_COOLDOWN_SECONDS: "60"
-      PERSONS_RESET_HOUR: "12"
+      PERSONS_RESET_HOUR: "0"
       PERSONS_RESET_MINUTE: "0"
     extra_hosts:
       - "host.docker.internal:host-gateway"

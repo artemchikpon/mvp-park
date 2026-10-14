@@ -21,12 +21,12 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Query, Session
 
-from core.timeutil import utcnow
+from core.timeutil import DEFAULT_PARK_TIMEZONE, utcnow
 from db.database import SessionLocal
 from db.models import CrossingEvent, ParkSettings, Person
 
 SETTINGS_ID = 1
-DEFAULT_SETTINGS = {"capacity": 5000, "warning_threshold": 4500, "timezone": "UTC"}
+DEFAULT_SETTINGS = {"capacity": 5000, "warning_threshold": 4500, "timezone": DEFAULT_PARK_TIMEZONE}
 
 
 # ── Возрастные группы (строго по ТЗ, раздел 2, Блок А) ──────────────────────

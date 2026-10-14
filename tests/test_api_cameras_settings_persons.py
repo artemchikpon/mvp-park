@@ -117,7 +117,7 @@ def test_get_settings_returns_defaults(api_client, api_key_header):
     assert resp.status_code == 200
     body = resp.json()
     assert body["capacity"] == 5000
-    assert body["timezone"] == "UTC"
+    assert body["timezone"] == "Asia/Tashkent"
 
 
 def test_update_settings_persists_changes(api_client, api_key_header):

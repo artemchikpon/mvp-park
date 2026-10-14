@@ -53,6 +53,14 @@ docker compose up -d --build
 # Swagger: http://localhost:8000/docs (ENABLE_DOCS=true в compose)
 ```
 
+В Swagger нажмите **Authorize** и введите ключ из `API_KEYS` — он подставится
+во все запросы (заголовок `X-API-Key`).
+
+**Таймзона парка** — `Asia/Tashkent` по умолчанию (`park_settings.timezone`).
+В ней считаются «сегодня», почасовые и дневные графики и время сброса
+`persons`; сами события в БД хранятся в UTC. Сменить: `PUT /settings/`
+с `{"timezone": "..."}`.
+
 Тестовые данные для дашборда (Postgres из compose должен быть доступен на localhost):
 
 ```bash
@@ -78,7 +86,7 @@ DATABASE_URL=postgresql://face:face@localhost:5432/face_db python scripts/seed_d
 | `OVERFLOW_MIN_BACKLOG` | worker | `10` | с какой очереди (невыданных кадров) подключается `overflow` |
 | `PRODUCER_MAX_FPS` | producer | `5` | максимум кадров в секунду с одной камеры в Redis; `0` — без ограничения |
 | `CROSSING_COOLDOWN_SECONDS` | worker | `60` | анти-дубль одного человека на одной камере |
-| `PERSONS_RESET_HOUR` / `_MINUTE` | worker | `12` / `0` | время ежедневной очистки `persons` (таймзона парка) |
+| `PERSONS_RESET_HOUR` / `_MINUTE` | worker | `0` / `0` | время ежедневной очистки `persons` (таймзона парка), по умолчанию 00:00 |
 
 ## Разработка
 

@@ -4,7 +4,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
-from core.timeutil import utcnow
+from core.timeutil import DEFAULT_PARK_TIMEZONE, utcnow
 from db.database import Base
 
 _DIRECTION_CHECK = "direction in ('in','out')"
@@ -86,5 +86,5 @@ class ParkSettings(Base):
     id = Column(Integer, primary_key=True)
     capacity = Column(Integer, nullable=False, default=5000)
     warning_threshold = Column(Integer, nullable=False, default=4500)
-    timezone = Column(String(64), nullable=False, default="UTC")
+    timezone = Column(String(64), nullable=False, default=DEFAULT_PARK_TIMEZONE)
     updated_at = Column(DateTime, default=utcnow)

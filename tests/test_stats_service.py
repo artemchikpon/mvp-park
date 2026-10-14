@@ -42,7 +42,7 @@ def test_get_settings_creates_default_row_once(db_session):
     assert s1.id == 1
     assert s1.capacity == 5000
     assert s1.warning_threshold == 4500
-    assert s1.timezone == "UTC"
+    assert s1.timezone == "Asia/Tashkent"
 
     # повторный вызов не должен плодить новую строку
     s2 = svc.get_settings(db_session)
@@ -56,7 +56,7 @@ def test_update_settings_only_changes_provided_fields(db_session):
     assert updated.capacity == 5000
     # None-поля не переданы -> не меняются.
     assert updated.warning_threshold == 4500
-    assert updated.timezone == "UTC"
+    assert updated.timezone == "Asia/Tashkent"
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -159,7 +159,8 @@ def test_live_occupancy_filters_by_gate(db_session):
 # ── day timeseries ───────────────────────────────────────────────────────────
 
 def test_day_timeseries_buckets_by_utc_hour_when_tz_is_utc(db_session):
-    svc.get_settings(db_session)  # timezone=UTC по умолчанию
+    svc.get_settings(db_session)
+    svc.update_settings(db_session, timezone="UTC")  # тест про часы в UTC
     cam_in = _make_camera(db_session, direction="in")
     today = date.today()
     ts_9am = datetime(today.year, today.month, today.day, 9, 15)
@@ -188,6 +189,7 @@ def test_day_timeseries_empty_day_has_no_peak(db_session):
 
 def test_day_timeseries_session_hours_only_when_out_after_in(db_session):
     svc.get_settings(db_session)
+    svc.update_settings(db_session, timezone="UTC")  # события ниже заданы в UTC
     cam_in = _make_camera(db_session, direction="in")
     cam_out = _make_camera(db_session, direction="out")
     today = date.today()
@@ -202,6 +204,23 @@ def test_day_timeseries_session_hours_only_when_out_after_in(db_session):
     assert result["peak_in_hour"] == 9
     assert result["peak_out_hour"] == 18
     assert result["estimated_session_hours"] == 9
+
+
+def test_day_timeseries_buckets_by_tashkent_hour_by_default(db_session):
+    """Парк по умолчанию в Ташкенте (UTC+5): событие в 04:15 UTC — это 9-й час
+    по местному времени, а сутки начинаются в 19:00 UTC предыдущего дня."""
+    settings = svc.get_settings(db_session)
+    assert settings.timezone == "Asia/Tashkent"
+    cam_in = _make_camera(db_session, direction="in")
+    day = date(2026, 10, 14)
+    _add_event(db_session, cam_in, datetime(2026, 10, 14, 4, 15), person_id=1)   # 09:15 Ташкент
+    _add_event(db_session, cam_in, datetime(2026, 10, 14, 4, 40), person_id=4)   # 09:40 Ташкент
+    _add_event(db_session, cam_in, datetime(2026, 10, 13, 19, 30), person_id=2)  # 00:30 Ташкент, тот же день
+    _add_event(db_session, cam_in, datetime(2026, 10, 13, 18, 59), person_id=3)  # 23:59 предыдущего дня
+
+    result = svc.get_day_timeseries(db_session, day)
+    assert result["peak_in_hour"] == 9
+    assert result["total_in"] == 3
 
 
 def test_day_timeseries_no_session_estimate_when_out_before_in(db_session):

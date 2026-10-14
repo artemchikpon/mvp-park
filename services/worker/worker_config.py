@@ -56,7 +56,7 @@ if FACE_CPU_THREADS < 0:
     raise ValueError(f"FACE_CPU_THREADS должен быть >= 0, получено: {FACE_CPU_THREADS}")
 
 # ── Ежедневный сброс галереи persons ─────────────────────────────────────────
-PERSONS_RESET_HOUR = env_int("PERSONS_RESET_HOUR", 12)
+PERSONS_RESET_HOUR = env_int("PERSONS_RESET_HOUR", 0)  # полночь: парк закрыт
 PERSONS_RESET_MINUTE = env_int("PERSONS_RESET_MINUTE", 0)
 PERSONS_RESET_LOCK_TTL = 300  # сек — с запасом на выполнение DELETE
 

@@ -17,8 +17,9 @@ import os
 import random
 import struct
 import sys
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 # Скрипт запускается вне контейнеров: подключаем shared/ (пакеты db, core)
 # и по умолчанию смотрим на локальный Postgres.
@@ -27,9 +28,14 @@ os.environ.setdefault("DATABASE_URL", "postgresql://face:face@localhost:5432/fac
 
 from sqlalchemy import text  # noqa: E402
 
-from core.timeutil import utcnow  # noqa: E402
+from core.timeutil import DEFAULT_PARK_TIMEZONE, utcnow  # noqa: E402
 from db.database import SessionLocal  # noqa: E402
 from db.models import Camera, CrossingEvent, ParkSettings, Person  # noqa: E402
+
+
+# Часы посещений ниже — местное время парка; в БД события пишутся в UTC
+# (как их пишет воркер), иначе на дашборде пик сдвигается на смещение таймзоны.
+PARK_TZ = ZoneInfo(DEFAULT_PARK_TIMEZONE)
 
 
 # ── Вспомогательные функции ────────────────────────────────────────────────────
@@ -50,8 +56,13 @@ def hourly_weight(hour: int) -> float:
     return profile.get(hour, 0.05)
 
 
+def local_to_utc(local_dt: datetime) -> datetime:
+    """Местное время парка (naive) -> naive UTC, как в crossing_events.ts."""
+    return local_dt.replace(tzinfo=PARK_TZ).astimezone(timezone.utc).replace(tzinfo=None)
+
+
 def random_ts_in_day(day: date) -> datetime:
-    """Случайный timestamp за день с весом по часу."""
+    """Случайное местное время за день парка с весом по часу (naive)."""
     # Генерируем час по профилю
     hours = list(range(6, 24))
     weights = [hourly_weight(h) for h in hours]
@@ -90,7 +101,7 @@ def seed():
                 id=1,
                 capacity=5000,
                 warning_threshold=4500,
-                timezone="Asia/Tashkent",
+                timezone=DEFAULT_PARK_TIMEZONE,
                 updated_at=utcnow(),
             ))
             db.commit()
@@ -165,7 +176,7 @@ def seed():
         DAYS_BACK = 30
         print(f"→ События CrossingEvent за {DAYS_BACK} дней...")
 
-        today = date.today()
+        today = datetime.now(PARK_TZ).date()
         start_date = today - timedelta(days=DAYS_BACK - 1)
 
         # Примерное количество событий в день (вход+выход) варьируется
@@ -195,7 +206,7 @@ def seed():
                     person_id=person.id,
                     age=person.age,
                     gender=person.gender,
-                    ts=ts_in,
+                    ts=local_to_utc(ts_in),
                 ))
 
                 # Событие выхода — через 0.5–4 часа, с вероятностью 90%
@@ -212,7 +223,7 @@ def seed():
                             person_id=person.id,
                             age=person.age,
                             gender=person.gender,
-                            ts=ts_out,
+                            ts=local_to_utc(ts_out),
                         ))
 
             # Записываем пачками по 1000

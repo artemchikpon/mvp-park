@@ -17,6 +17,7 @@ import redis
 
 import redis_conn
 from core.redis_keys import PERSONS_RESET_LOCK
+from core.timeutil import DEFAULT_PARK_TIMEZONE
 from db import stats_service
 from db.database import SessionLocal
 from face_storage_pg import FaceStoragePG
@@ -30,13 +31,15 @@ RETRY_DELAY_S = 60
 
 
 def park_timezone() -> ZoneInfo:
-    """Таймзона парка. При любой ошибке — UTC, чтобы поток сброса не падал."""
+    """Таймзона парка. При любой ошибке — таймзона по умолчанию, чтобы поток
+    сброса не падал."""
     session = SessionLocal()
     try:
         return ZoneInfo(stats_service.get_settings(session).timezone)
     except Exception as e:
-        log.warning(f"[persons_reset] Не удалось прочитать таймзону парка, использую UTC: {e}")
-        return ZoneInfo("UTC")
+        log.warning(f"[persons_reset] Не удалось прочитать таймзону парка, "
+                    f"использую {DEFAULT_PARK_TIMEZONE}: {e}")
+        return ZoneInfo(DEFAULT_PARK_TIMEZONE)
     finally:
         session.close()
 

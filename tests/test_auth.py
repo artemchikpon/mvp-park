@@ -69,3 +69,26 @@ def test_protected_route_accepts_valid_key(api_client, api_key_header):
 def test_all_business_routes_require_key(api_client, method, path):
     resp = api_client.request(method, path)
     assert resp.status_code == 401, f"{method} {path} должен требовать X-API-Key"
+
+
+# ── Swagger: кнопка Authorize ────────────────────────────────────────────────
+
+def test_openapi_declares_api_key_security_scheme(api_client):
+    from api.main import app
+
+    schema = app.openapi()
+    schemes = schema["components"]["securitySchemes"]
+    assert schemes == {
+        "APIKeyHeader": {
+            "type": "apiKey",
+            "in": "header",
+            "name": "X-API-Key",
+            "description": "Ключ из переменной окружения API_KEYS",
+        }
+    }
+    # защищённые роуты ссылаются на схему, публичный /health — нет
+    assert schema["paths"]["/cameras/"]["get"]["security"] == [{"APIKeyHeader": []}]
+    assert "security" not in schema["paths"]["/health"]["get"]
+    # заголовок больше не дублируется обычным параметром в каждом запросе
+    params = schema["paths"]["/cameras/"]["get"].get("parameters", [])
+    assert not any(p["name"].lower() == "x-api-key" for p in params)
