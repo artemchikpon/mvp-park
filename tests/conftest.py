@@ -38,6 +38,7 @@ os.environ.setdefault("DATABASE_URL", f"sqlite:///{_tmp_db_path}")
 
 # ── 4. API-ключ для services/api/auth.py ────────────────────────────────────
 os.environ.setdefault("API_KEYS", "test-key-1,test-key-2")
+os.environ.setdefault("JWT_SECRET", "test-jwt-secret-" + "x" * 32)
 
 from db.database import Base, engine, SessionLocal  # noqa: E402
 from db import models  # noqa: E402,F401  (регистрирует все таблицы в Base.metadata)
@@ -69,3 +70,33 @@ def api_client(db_session):
 @pytest.fixture()
 def api_key_header():
     return {"X-API-Key": "test-key-1"}
+
+
+# ── JWT: пользователи и токены ──────────────────────────────────────────────
+
+@pytest.fixture()
+def make_user(db_session):
+    from api import security
+    from db.models import User
+
+    def _make(username="admin", password="admin-pass-123", role="admin", is_active=True):
+        user = User(username=username, password_hash=security.hash_password(password),
+                    role=role, is_active=is_active)
+        db_session.add(user)
+        db_session.commit()
+        db_session.refresh(user)
+        return user
+
+    return _make
+
+
+@pytest.fixture()
+def bearer(make_user):
+    """Заголовок Authorization для нового пользователя с ролью role."""
+    from api import security
+
+    def _bearer(role="admin", username=None):
+        user = make_user(username=username or f"{role}-user", role=role)
+        return {"Authorization": f"Bearer {security.create_access_token(user.id)}"}
+
+    return _bearer

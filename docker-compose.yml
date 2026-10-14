@@ -72,9 +72,16 @@ services:
       # CORS_ORIGINS можно передать через .env, например:
       # https://dashboard.example.com,https://admin.example.com
       CORS_ORIGINS: "${CORS_ORIGINS:-*}"
-      # ВАЖНО: заменить на реальные секреты перед продом (например, через
-      # .env файл / docker secret, не хранить в git).
-      API_KEYS: "${API_KEYS:?Задайте API_KEYS в .env — см. auth.py}"
+      # ВАЖНО: реальные секреты — только в .env / docker secret, не в git.
+      # Подпись JWT-токенов (обязательно, >= 32 символов): openssl rand -hex 32
+      JWT_SECRET: "${JWT_SECRET:?Задайте JWT_SECRET в .env — см. security.py}"
+      ACCESS_TOKEN_MINUTES: "${ACCESS_TOKEN_MINUTES:-30}"
+      REFRESH_TOKEN_DAYS: "${REFRESH_TOKEN_DAYS:-7}"
+      # Первый admin создаётся, только пока таблица users пуста.
+      ADMIN_USERNAME: "${ADMIN_USERNAME:-}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
+      # Ключи для скриптов и интеграций (права admin), необязательно.
+      API_KEYS: "${API_KEYS:-}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on: *app-depends

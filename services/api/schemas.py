@@ -194,3 +194,67 @@ class SyncResult(BaseModel):
     updated: int
     skipped: int
     errors: int
+
+
+# ── Auth / Users ─────────────────────────────────────────────────────────────
+
+Role = Literal["admin", "viewer"]
+
+
+class TokenPair(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int               # срок жизни access-токена, секунд
+
+
+class RefreshIn(BaseModel):
+    refresh_token: str
+
+
+class MeOut(BaseModel):
+    role: Role
+    user_id: Optional[int] = None     # None — вход по API-ключу
+    username: Optional[str] = None
+
+
+def _check_username(v: str | None) -> str | None:
+    if v is None:
+        return None
+    v = v.strip()
+    if not 3 <= len(v) <= 64:
+        raise ValueError("username: от 3 до 64 символов")
+    return v
+
+
+def _check_password(v: str | None) -> str | None:
+    if v is not None and len(v) < 8:
+        raise ValueError("пароль: не короче 8 символов")
+    return v
+
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    role: Role = "viewer"
+
+    _username = field_validator("username")(_check_username)
+    _password = field_validator("password")(_check_password)
+
+
+class UserUpdate(BaseModel):
+    password: Optional[str] = None
+    role: Optional[Role] = None
+    is_active: Optional[bool] = None
+
+    _password = field_validator("password")(_check_password)
+
+
+class UserOut(BaseModel):
+    id: int
+    username: str
+    role: Role
+    is_active: bool
+    created_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}

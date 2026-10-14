@@ -1,6 +1,7 @@
 """Настройки api-сервиса из окружения.
 
-API_KEYS читается в auth.py: без ключей сервис намеренно не стартует.
+Авторизация: API_KEYS — в auth.py, JWT_SECRET и сроки токенов — в security.py
+(без JWT_SECRET сервис намеренно не стартует), первый admin — в bootstrap.py.
 """
 
 from core.env import env_int, env_list, env_str

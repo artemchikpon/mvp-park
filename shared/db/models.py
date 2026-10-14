@@ -88,3 +88,26 @@ class ParkSettings(Base):
     warning_threshold = Column(Integer, nullable=False, default=4500)
     timezone = Column(String(64), nullable=False, default=DEFAULT_PARK_TIMEZONE)
     updated_at = Column(DateTime, default=utcnow)
+
+
+USER_ROLES = ("admin", "viewer")
+
+
+class User(Base):
+    """Пользователь администрации для входа в API по JWT.
+
+    admin — полный доступ (камеры, настройки, сотрудники, пользователи);
+    viewer — только чтение (GET). Пароль хранится только как хэш.
+    """
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String(64), nullable=False, unique=True)
+    password_hash = Column(String(255), nullable=False)
+    role = Column(String(16), nullable=False, default="viewer")
+    is_active = Column(Boolean, nullable=False, default=True, server_default=true())
+    created_at = Column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        CheckConstraint("role in ('admin','viewer')", name="ck_users_role"),
+    )

@@ -4,32 +4,18 @@
 """
 
 import pytest
-from fastapi import HTTPException
 
-from api.auth import require_api_key
-
-
-def test_require_api_key_accepts_valid_key():
-    # Не должно бросать исключение
-    require_api_key(x_api_key="test-key-1")
-    require_api_key(x_api_key="test-key-2")
+from api.auth import api_key_is_valid
 
 
-def test_require_api_key_rejects_missing_header():
-    with pytest.raises(HTTPException) as exc_info:
-        require_api_key(x_api_key=None)
-    assert exc_info.value.status_code == 401
+def test_api_key_is_valid_accepts_configured_keys():
+    assert api_key_is_valid("test-key-1")
+    assert api_key_is_valid("test-key-2")
 
 
-def test_require_api_key_rejects_wrong_key():
-    with pytest.raises(HTTPException) as exc_info:
-        require_api_key(x_api_key="totally-wrong-key")
-    assert exc_info.value.status_code == 401
-
-
-def test_require_api_key_rejects_empty_string():
-    with pytest.raises(HTTPException):
-        require_api_key(x_api_key="")
+@pytest.mark.parametrize("key", [None, "", "totally-wrong-key"])
+def test_api_key_is_valid_rejects_missing_empty_and_wrong(key):
+    assert not api_key_is_valid(key)
 
 
 # ── интеграционные проверки через реальные роуты FastAPI ───────────────────
@@ -66,29 +52,31 @@ def test_protected_route_accepts_valid_key(api_client, api_key_header):
         ("GET", "/stats/live"),
     ],
 )
-def test_all_business_routes_require_key(api_client, method, path):
+def test_all_business_routes_require_auth(api_client, method, path):
     resp = api_client.request(method, path)
-    assert resp.status_code == 401, f"{method} {path} должен требовать X-API-Key"
+    assert resp.status_code == 401, f"{method} {path} должен требовать JWT или X-API-Key"
 
 
 # ── Swagger: кнопка Authorize ────────────────────────────────────────────────
 
-def test_openapi_declares_api_key_security_scheme(api_client):
+def test_openapi_declares_api_key_and_oauth2_schemes(api_client):
     from api.main import app
 
     schema = app.openapi()
     schemes = schema["components"]["securitySchemes"]
-    assert schemes == {
-        "APIKeyHeader": {
-            "type": "apiKey",
-            "in": "header",
-            "name": "X-API-Key",
-            "description": "Ключ из переменной окружения API_KEYS",
-        }
+    assert schemes["APIKeyHeader"] == {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "Ключ из переменной окружения API_KEYS (права admin)",
     }
-    # защищённые роуты ссылаются на схему, публичный /health — нет
-    assert schema["paths"]["/cameras/"]["get"]["security"] == [{"APIKeyHeader": []}]
+    assert schemes["OAuth2PasswordBearer"]["type"] == "oauth2"
+    assert schemes["OAuth2PasswordBearer"]["flows"]["password"]["tokenUrl"] == "auth/login"
+    # защищённые роуты ссылаются на обе схемы, публичные /health и /auth/login — нет
+    security = schema["paths"]["/cameras/"]["get"]["security"]
+    assert {"APIKeyHeader": []} in security and {"OAuth2PasswordBearer": []} in security
     assert "security" not in schema["paths"]["/health"]["get"]
-    # заголовок больше не дублируется обычным параметром в каждом запросе
+    assert "security" not in schema["paths"]["/auth/login"]["post"]
+    # заголовок не дублируется обычным параметром в каждом запросе
     params = schema["paths"]["/cameras/"]["get"].get("parameters", [])
     assert not any(p["name"].lower() == "x-api-key" for p in params)

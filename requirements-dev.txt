@@ -18,6 +18,8 @@ redis
 numpy
 scikit-learn
 opencv-python-headless
+PyJWT>=2.8
+python-multipart
 
 pytest>=8.0
 fakeredis>=2.20

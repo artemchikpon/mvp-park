@@ -4,3 +4,5 @@ pydantic>=2.0
 SQLAlchemy>=2.0,<2.1  # 2.1 по умолчанию ведёт postgresql:// на psycopg3, а в образах psycopg2
 psycopg2-binary
 redis
+PyJWT>=2.8
+python-multipart  # форма логина OAuth2 (POST /auth/login)
