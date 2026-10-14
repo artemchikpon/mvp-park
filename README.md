@@ -73,6 +73,7 @@ DATABASE_URL=postgresql://face:face@localhost:5432/face_db python scripts/seed_d
 | `HR_EMPLOYEES_PAGE_LIMIT` | worker | `100` | размер страницы HR API |
 | `PERF_LOG_INTERVAL` | worker, producer | `30` | раз в N секунд писать в лог сводку `[perf ...]`: время шагов, CPU процесса, кадры/с; `0` — выключить |
 | `FACE_DEVICE` | worker | `cpu` | где считать InsightFace: `cpu` или `gpu` (CUDA; без GPU сам откатывается на CPU) |
+| `FACE_CPU_THREADS` | worker | `0` | потоков CPU на одну модель InsightFace; `0` — решает onnxruntime. Потоки засыпают между кадрами (spinning выключен), поэтому простаивающий воркер не грузит CPU |
 | `WORKER_ROLE` | worker | `primary` | `overflow` — подстраховка: берёт кадры, только если очередь копится |
 | `OVERFLOW_MIN_BACKLOG` | worker | `10` | с какой очереди (невыданных кадров) подключается `overflow` |
 | `PRODUCER_MAX_FPS` | producer | `5` | максимум кадров в секунду с одной камеры в Redis; `0` — без ограничения |
@@ -131,7 +132,7 @@ NVIDIA Container Toolkit (Linux) или Docker Desktop с WSL2 (Windows). Про
 docker run --rm --gpus all nvidia/cuda:12.6.2-base-ubuntu22.04 nvidia-smi
 ```
 
-При старте воркер пишет `InsightFace device: requested=gpu, active=gpu`;
+При старте воркер пишет `InsightFace device: requested=gpu, active=gpu, ...`;
 если там `active=cpu` — видеокарта контейнеру недоступна. Отчёты `[perf ...]`
 подписаны устройством и ролью: `[perf worker gpu primary]`,
 `[perf worker cpu overflow]`.

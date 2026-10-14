@@ -43,10 +43,17 @@ WORKER_ROLE = env_str("WORKER_ROLE", "primary").strip().lower()
 OVERFLOW_MIN_BACKLOG = env_int("OVERFLOW_MIN_BACKLOG", 10)
 OVERFLOW_IDLE_SLEEP_S = 0.5
 
+# FACE_CPU_THREADS: сколько потоков процессора onnxruntime даёт одной модели
+# (intra-op). 0 — сколько решит onnxruntime (по числу ядер), как раньше.
+# Потоки в любом случае засыпают между кадрами (см. device.session_options).
+FACE_CPU_THREADS = env_int("FACE_CPU_THREADS", 0)
+
 if FACE_DEVICE not in ("cpu", "gpu"):
     raise ValueError(f"FACE_DEVICE должен быть cpu или gpu, получено: {FACE_DEVICE!r}")
 if WORKER_ROLE not in ("primary", "overflow"):
     raise ValueError(f"WORKER_ROLE должен быть primary или overflow, получено: {WORKER_ROLE!r}")
+if FACE_CPU_THREADS < 0:
+    raise ValueError(f"FACE_CPU_THREADS должен быть >= 0, получено: {FACE_CPU_THREADS}")
 
 # ── Ежедневный сброс галереи persons ─────────────────────────────────────────
 PERSONS_RESET_HOUR = env_int("PERSONS_RESET_HOUR", 12)

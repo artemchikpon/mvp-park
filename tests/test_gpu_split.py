@@ -37,6 +37,37 @@ def test_active_device_is_detected_from_sessions(sessions, expected):
     assert device.active_device(sessions) == expected
 
 
+class _FakeSessionOptions:
+    def __init__(self):
+        self.config = {}
+        self.intra_op_num_threads = 0
+
+    def add_session_config_entry(self, key, value):
+        self.config[key] = value
+
+
+@pytest.fixture()
+def fake_ort(monkeypatch):
+    # onnxruntime в тестовом окружении не ставится (см. requirements-dev.txt)
+    import sys
+    import types
+    monkeypatch.setitem(sys.modules, "onnxruntime",
+                        types.SimpleNamespace(SessionOptions=_FakeSessionOptions))
+
+
+def test_session_options_disable_spinning_and_keep_auto_threads(fake_ort):
+    opts = device.session_options()
+    assert opts.config == {
+        "session.intra_op.allow_spinning": "0",
+        "session.inter_op.allow_spinning": "0",
+    }
+    assert opts.intra_op_num_threads == 0  # 0 — число потоков выбирает onnxruntime
+
+
+def test_session_options_limit_threads(fake_ort):
+    assert device.session_options(2).intra_op_num_threads == 2
+
+
 def test_preload_cuda_libs_never_raises():
     device.preload_cuda_libs()  # на машине без GPU/onnxruntime-gpu — просто ничего
 
