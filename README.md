@@ -72,6 +72,9 @@ DATABASE_URL=postgresql://face:face@localhost:5432/face_db python scripts/seed_d
 | `HR_API_BASE` / `HR_SSL_VERIFY` | worker | — / `true` | HR-система с сотрудниками |
 | `HR_EMPLOYEES_PAGE_LIMIT` | worker | `100` | размер страницы HR API |
 | `PERF_LOG_INTERVAL` | worker, producer | `30` | раз в N секунд писать в лог сводку `[perf ...]`: время шагов, CPU процесса, кадры/с; `0` — выключить |
+| `FACE_DEVICE` | worker | `cpu` | где считать InsightFace: `cpu` или `gpu` (CUDA; без GPU сам откатывается на CPU) |
+| `WORKER_ROLE` | worker | `primary` | `overflow` — подстраховка: берёт кадры, только если очередь копится |
+| `OVERFLOW_MIN_BACKLOG` | worker | `10` | с какой очереди (невыданных кадров) подключается `overflow` |
 | `PRODUCER_MAX_FPS` | producer | `5` | максимум кадров в секунду с одной камеры в Redis; `0` — без ограничения |
 | `CROSSING_COOLDOWN_SECONDS` | worker | `60` | анти-дубль одного человека на одной камере |
 | `PERSONS_RESET_HOUR` / `_MINUTE` | worker | `12` / `0` | время ежедневной очистки `persons` (таймзона парка) |
@@ -108,3 +111,29 @@ docker compose logs -f worker producer | grep perf
   (растёт, если воркеры не успевают); `gallery_persons` — размер галереи;
 - producer: по каждой камере `grabbed` (прочитано из потока) и `sent`
   (отправлено в Redis) в секунду, время `retrieve`, `jpeg`, `xadd`.
+
+## Распознавание на видеокарте (GPU / CPU)
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+```
+
+- `worker-gpu` — InsightFace на NVIDIA через CUDA (`services/worker/Dockerfile.gpu`,
+  `onnxruntime-gpu` 1.26 + библиотеки CUDA 12.6 из pip), основной воркер;
+- `worker` (CPU) — `WORKER_ROLE=overflow`: пока GPU справляется, не берёт
+  кадры и не тратит CPU; если очередь выросла до `OVERFLOW_MIN_BACKLOG`
+  (GPU не успевает или упал) — подключается сам и подбирает зависшие кадры.
+
+Требования к хосту: видеокарта NVIDIA, драйвер с поддержкой CUDA >= 12.6,
+NVIDIA Container Toolkit (Linux) или Docker Desktop с WSL2 (Windows). Проверка:
+
+```bash
+docker run --rm --gpus all nvidia/cuda:12.6.2-base-ubuntu22.04 nvidia-smi
+```
+
+При старте воркер пишет `InsightFace device: requested=gpu, active=gpu`;
+если там `active=cpu` — видеокарта контейнеру недоступна. Отчёты `[perf ...]`
+подписаны устройством и ролью: `[perf worker gpu primary]`,
+`[perf worker cpu overflow]`.
+
+Без второго файла (`docker compose up`) всё работает как раньше — только на CPU.

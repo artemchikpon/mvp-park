@@ -5,6 +5,12 @@ Consumer group раздаёт каждое сообщение ровно одн�
 Сообщение подтверждается (XACK) только после успешной обработки; если
 реплика упала посреди кадра, сообщение остаётся в PEL и через CLAIM_IDLE_MS
 его подбирает другая реплика (XAUTOCLAIM).
+
+Роль overflow (WORKER_ROLE=overflow, обычно CPU-воркер рядом с GPU-воркером):
+новые кадры берутся, только если в очереди накопилось не меньше
+OVERFLOW_MIN_BACKLOG ещё никому не выданных кадров. Пока GPU-воркер
+справляется, очередь пуста и CPU не тратится; если GPU не успевает или упал,
+очередь растёт и overflow-воркер подключается сам.
 """
 
 import logging
@@ -15,7 +21,11 @@ import redis
 
 import redis_conn
 from core.redis_keys import FRAMES_CONSUMER_GROUP, FRAMES_STREAM
-from worker_config import BLOCK_MS, CLAIM_IDLE_MS, CLAIM_INTERVAL_S, CONSUMER_NAME
+from core import perf
+from worker_config import (
+    BLOCK_MS, CLAIM_IDLE_MS, CLAIM_INTERVAL_S, CONSUMER_NAME, OVERFLOW_IDLE_SLEEP_S,
+    OVERFLOW_MIN_BACKLOG, WORKER_ROLE,
+)
 
 log = logging.getLogger("worker")
 
@@ -71,11 +81,41 @@ def _claim_stale(handler: Handler) -> None:
         cursor = next_cursor
 
 
+def undelivered_count(limit: int) -> int:
+    """Сколько кадров в стриме ещё не выдано ни одному консьюмеру группы
+    (не больше limit — точнее не нужно). Основной источник — поле lag из
+    XINFO GROUPS (Redis >= 7); если Redis не может его посчитать (None),
+    считаем XRANGE после last-delivered-id."""
+    for group in redis_conn.r.xinfo_groups(FRAMES_STREAM):
+        name = group.get("name")
+        if name not in (FRAMES_CONSUMER_GROUP, FRAMES_CONSUMER_GROUP.encode()):
+            continue
+        lag = group.get("lag")
+        if lag is not None:
+            return min(int(lag), limit)
+        last = group.get("last-delivered-id")
+        last = last.decode() if isinstance(last, bytes) else last
+        return len(redis_conn.r.xrange(FRAMES_STREAM, min=f"({last}", max="+", count=limit))
+    return 0
+
+
+def _should_read_new() -> bool:
+    if WORKER_ROLE != "overflow":
+        return True
+    if undelivered_count(OVERFLOW_MIN_BACKLOG) >= OVERFLOW_MIN_BACKLOG:
+        perf.get("worker").count("overflow_active_polls")
+        return True
+    return False
+
+
 def consume_forever(handler: Handler) -> None:
     last_claim_check = 0.0
     while True:
         try:
-            _read_new(handler)
+            if _should_read_new():
+                _read_new(handler)
+            else:
+                time.sleep(OVERFLOW_IDLE_SLEEP_S)
         except redis.exceptions.ConnectionError as e:
             log.warning(f"Redis connection lost: {e}, reconnecting in 2s...")
             time.sleep(2)

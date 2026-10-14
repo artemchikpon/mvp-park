@@ -18,6 +18,7 @@ import employee_jobs
 import employee_sync
 import persons_reset
 import stream_consumer
+import worker_config
 from core import perf
 from core.redis_utils import wait_for_redis
 from db.database import wait_for_db
@@ -34,7 +35,18 @@ def main() -> None:
     wait_for_db()
     wait_for_redis()
     stream_consumer.ensure_consumer_group()
-    perf.get("worker").start_reporter()
+
+    # face_engine загружает модель при импорте и определяет фактическое
+    # устройство; подписываем им отчёты [perf ...], чтобы GPU- и CPU-воркеры
+    # было видно отдельно.
+    from face_engine import ACTIVE_DEVICE
+
+    stats = perf.get("worker")
+    stats.name = f"worker {ACTIVE_DEVICE} {worker_config.WORKER_ROLE}"
+    log.info(f"Worker started: device={ACTIVE_DEVICE}, role={worker_config.WORKER_ROLE}"
+             + (f", overflow from backlog >= {worker_config.OVERFLOW_MIN_BACKLOG}"
+                if worker_config.WORKER_ROLE == "overflow" else ""))
+    stats.start_reporter()
 
     camera_cache.reload_cameras()  # первичная загрузка перед стартом основного цикла
     _start_daemon(camera_cache.reload_loop, "camera-reload")

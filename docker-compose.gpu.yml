@@ -1,0 +1,58 @@
+# Разделение GPU / CPU: распознавание лиц на видеокарте NVIDIA, CPU-воркер —
+# подстраховка. Подключается поверх основного файла:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+#
+# - worker-gpu: InsightFace через CUDA, берёт кадры из очереди всегда;
+# - worker (CPU): WORKER_ROLE=overflow — берёт новые кадры, только когда в
+#   очереди накопилось >= OVERFLOW_MIN_BACKLOG кадров (GPU не успевает или
+#   упал), и подбирает сообщения, зависшие у упавшего GPU-воркера.
+#
+# Требования к хосту: видеокарта NVIDIA, драйвер с поддержкой CUDA >= 12.6,
+# NVIDIA Container Toolkit (Linux) или Docker Desktop с WSL2 (Windows).
+# Проверка: docker run --rm --gpus all nvidia/cuda:12.6.2-base-ubuntu22.04 nvidia-smi
+
+services:
+
+  worker:
+    environment:
+      WORKER_ROLE: overflow
+      OVERFLOW_MIN_BACKLOG: "${OVERFLOW_MIN_BACKLOG:-10}"
+    deploy:
+      replicas: 1
+
+  worker-gpu:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile.gpu
+    # Якоря из docker-compose.yml между файлами не видны, поэтому общие
+    # переменные продублированы (держать в синхроне с x-app-env / x-hr-env).
+    environment:
+      DATABASE_URL: postgresql://face:face@postgres:5432/face_db
+      REDIS_HOST: redis
+      PERF_LOG_INTERVAL: "${PERF_LOG_INTERVAL:-30}"
+      HR_API_BASE: "https://central-park.rzbtech.uz"
+      HR_SSL_VERIFY: "true"
+      FACE_DEVICE: gpu
+      WORKER_ROLE: primary
+      CROSSING_COOLDOWN_SECONDS: "60"
+      PERSONS_RESET_HOUR: "12"
+      PERSONS_RESET_MINUTE: "0"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    deploy:
+      replicas: 1
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

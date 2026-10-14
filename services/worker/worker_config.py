@@ -29,6 +29,25 @@ CROSSING_COOLDOWN_SECONDS = env_int("CROSSING_COOLDOWN_SECONDS", 60)
 
 CAMERA_RELOAD_INTERVAL = 30  # сек, как у producer
 
+# ── Устройство и роль воркера (разделение GPU / CPU) ────────────────────────
+# FACE_DEVICE: cpu | gpu — на чём считать модель InsightFace (см. device.py).
+FACE_DEVICE = env_str("FACE_DEVICE", "cpu").strip().lower()
+
+# WORKER_ROLE:
+#   primary  — берёт кадры из очереди всегда (поведение по умолчанию);
+#   overflow — подстраховка: берёт новые кадры, только когда в очереди
+#              накопилось не меньше OVERFLOW_MIN_BACKLOG невыданных кадров
+#              (основные воркеры не успевают или GPU-воркер упал). Зависшие
+#              у упавших реплик сообщения (XAUTOCLAIM) забирает всегда.
+WORKER_ROLE = env_str("WORKER_ROLE", "primary").strip().lower()
+OVERFLOW_MIN_BACKLOG = env_int("OVERFLOW_MIN_BACKLOG", 10)
+OVERFLOW_IDLE_SLEEP_S = 0.5
+
+if FACE_DEVICE not in ("cpu", "gpu"):
+    raise ValueError(f"FACE_DEVICE должен быть cpu или gpu, получено: {FACE_DEVICE!r}")
+if WORKER_ROLE not in ("primary", "overflow"):
+    raise ValueError(f"WORKER_ROLE должен быть primary или overflow, получено: {WORKER_ROLE!r}")
+
 # ── Ежедневный сброс галереи persons ─────────────────────────────────────────
 PERSONS_RESET_HOUR = env_int("PERSONS_RESET_HOUR", 12)
 PERSONS_RESET_MINUTE = env_int("PERSONS_RESET_MINUTE", 0)
