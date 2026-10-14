@@ -12,18 +12,22 @@
 import logging
 import threading
 
-import camera_cache
-import crossings
-import employee_jobs
-import employee_sync
-import persons_reset
-import stream_consumer
-import worker_config
-from core import perf
-from core.redis_utils import wait_for_redis
-from db.database import wait_for_db
-
+# До импорта модулей воркера: crossings импортирует face_engine, а тот
+# загружает модель и пишет в лог устройство ("InsightFace device: ...")
+# прямо при импорте. Без настройки логирования эта INFO-строка терялась.
 logging.basicConfig(level=logging.INFO)
+
+import camera_cache  # noqa: E402
+import crossings  # noqa: E402
+import employee_jobs  # noqa: E402
+import employee_sync  # noqa: E402
+import persons_reset  # noqa: E402
+import stream_consumer  # noqa: E402
+import worker_config  # noqa: E402
+from core import perf  # noqa: E402
+from core.redis_utils import wait_for_redis  # noqa: E402
+from db.database import wait_for_db  # noqa: E402
+
 log = logging.getLogger("worker")
 
 
