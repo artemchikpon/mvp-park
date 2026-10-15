@@ -36,8 +36,7 @@ _tmp_db_fd, _tmp_db_path = tempfile.mkstemp(suffix=".sqlite3")
 os.close(_tmp_db_fd)
 os.environ.setdefault("DATABASE_URL", f"sqlite:///{_tmp_db_path}")
 
-# ── 4. API-ключ для services/api/auth.py ────────────────────────────────────
-os.environ.setdefault("API_KEYS", "test-key-1,test-key-2")
+# ── 4. Секрет JWT для services/api/security.py ──────────────────────────────
 os.environ.setdefault("JWT_SECRET", "test-jwt-secret-" + "x" * 32)
 
 from db.database import Base, engine, SessionLocal  # noqa: E402
@@ -65,11 +64,6 @@ def api_client(db_session):
 
     with TestClient(app) as client:
         yield client
-
-
-@pytest.fixture()
-def api_key_header():
-    return {"X-API-Key": "test-key-1"}
 
 
 # ── JWT: пользователи и токены ──────────────────────────────────────────────
@@ -100,3 +94,9 @@ def bearer(make_user):
         return {"Authorization": f"Bearer {security.create_access_token(user.id)}"}
 
     return _bearer
+
+
+@pytest.fixture()
+def auth_header(bearer):
+    """Authorization для admin — для тестов роутов, где роль не важна."""
+    return bearer("admin")

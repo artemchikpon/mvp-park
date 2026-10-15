@@ -30,7 +30,7 @@ def ensure_initial_admin() -> None:
         if not username or not password:
             log.warning(
                 "Пользователей нет, а ADMIN_USERNAME / ADMIN_PASSWORD не заданы: "
-                "вход по JWT невозможен, доступен только X-API-Key"
+                "войти в API невозможно — задайте их в .env и перезапустите api"
             )
             return
         if len(password) < 8:

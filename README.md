@@ -19,7 +19,7 @@
 | `migrator` | `shared/migrations` | `alembic upgrade head` при старте стека |
 | `producer` | `services/producer/camera.py` | читает активные камеры из БД, шлёт JPEG-кадры в стрим |
 | `worker` | `services/worker/` | лица → сотрудник? → галерея `persons` → событие `crossing_events` |
-| `api` | `services/api/` | REST: камеры, статистика, настройки, persons, сотрудники, пользователи (JWT или `X-API-Key`) |
+| `api` | `services/api/` | REST: камеры, статистика, настройки, persons, сотрудники, пользователи (JWT) |
 
 ### Модули worker
 
@@ -51,7 +51,6 @@
 echo "JWT_SECRET=$(openssl rand -hex 32)" > .env
 echo "ADMIN_USERNAME=admin" >> .env
 echo "ADMIN_PASSWORD=смените-этот-пароль" >> .env
-echo "API_KEYS=$(openssl rand -hex 24)" >> .env   # необязательно
 docker compose up -d --build
 # Swagger: http://localhost:8000/docs (ENABLE_DOCS=true в compose)
 ```
@@ -67,10 +66,8 @@ docker compose up -d --build
 - **Пользователи** — `/users` (только admin). Первый admin создаётся при старте
   из `ADMIN_USERNAME` / `ADMIN_PASSWORD`, пока таблица `users` пуста; дальше эти
   переменные ни на что не влияют.
-- **API-ключи** (`X-API-Key`, переменная `API_KEYS`) — для скриптов и
-  интеграций, права admin. Можно не задавать.
 
-В Swagger кнопка **Authorize**: логин/пароль (OAuth2) или ключ.
+В Swagger кнопка **Authorize**: логин и пароль (поля client_id/client_secret не нужны).
 
 **Таймзона парка** — `Asia/Tashkent` по умолчанию (`park_settings.timezone`).
 В ней считаются «сегодня», почасовые и дневные графики и время сброса
@@ -92,7 +89,6 @@ DATABASE_URL=postgresql://face:face@localhost:5432/face_db python scripts/seed_d
 | `JWT_SECRET` | api | — (обязательно, ≥ 32 символов) | подпись JWT-токенов |
 | `ACCESS_TOKEN_MINUTES` / `REFRESH_TOKEN_DAYS` | api | `30` / `7` | срок жизни токенов |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | api | — | первый admin, пока таблица `users` пуста |
-| `API_KEYS` | api | — | ключи для `X-API-Key` (права admin), через запятую; можно не задавать |
 | `CORS_ORIGINS` | api | `*` | разрешённые origin'ы дашборда |
 | `ENABLE_DOCS` | api | `false` | `/docs`, `/redoc`, `/openapi.json` |
 | `EMPLOYEE_SYNC_TIMEOUT` | api | `120` | сколько ждать ответа воркера, сек |

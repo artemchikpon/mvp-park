@@ -55,7 +55,7 @@ def test_login_returns_token_pair_and_me(api_client, make_user):
 
     me = api_client.get("/auth/me", headers={"Authorization": f"Bearer {body['access_token']}"})
     assert me.status_code == 200
-    assert me.json()["username"] == "boss" and me.json()["role"] == "admin"
+    assert me.json() == {"user_id": 1, "username": "boss", "role": "admin"}
 
 
 @pytest.mark.parametrize("username,password", [("boss", "wrong-pass-1"), ("nobody", "boss-pass-123")])
@@ -118,17 +118,6 @@ def test_admin_can_change(api_client, bearer):
     admin = bearer("admin")
     assert api_client.post("/cameras/", json=CAMERA, headers=admin).status_code == 201
     assert api_client.put("/settings/", json={"capacity": 6000}, headers=admin).status_code == 200
-
-
-def test_api_key_still_has_admin_rights(api_client, api_key_header):
-    assert api_client.post("/cameras/", json=CAMERA, headers=api_key_header).status_code == 201
-    me = api_client.get("/auth/me", headers=api_key_header).json()
-    assert me == {"role": "admin", "user_id": None, "username": None}
-
-
-def test_wrong_api_key_is_rejected_even_with_valid_token(api_client, bearer):
-    headers = {**bearer("admin"), "X-API-Key": "wrong"}
-    assert api_client.get("/cameras/", headers=headers).status_code == 401
 
 
 # ── /users ───────────────────────────────────────────────────────────────────

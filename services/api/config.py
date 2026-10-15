@@ -1,6 +1,6 @@
 """Настройки api-сервиса из окружения.
 
-Авторизация: API_KEYS — в auth.py, JWT_SECRET и сроки токенов — в security.py
+Авторизация (только JWT): проверка — в auth.py, JWT_SECRET и сроки токенов — в security.py
 (без JWT_SECRET сервис намеренно не стартует), первый admin — в bootstrap.py.
 """
 

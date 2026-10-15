@@ -213,9 +213,9 @@ class RefreshIn(BaseModel):
 
 
 class MeOut(BaseModel):
+    user_id: int
+    username: str
     role: Role
-    user_id: Optional[int] = None     # None — вход по API-ключу
-    username: Optional[str] = None
 
 
 def _check_username(v: str | None) -> str | None:

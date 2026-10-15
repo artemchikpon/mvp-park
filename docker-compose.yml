@@ -80,8 +80,6 @@ services:
       # Первый admin создаётся, только пока таблица users пуста.
       ADMIN_USERNAME: "${ADMIN_USERNAME:-}"
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
-      # Ключи для скриптов и интеграций (права admin), необязательно.
-      API_KEYS: "${API_KEYS:-}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on: *app-depends

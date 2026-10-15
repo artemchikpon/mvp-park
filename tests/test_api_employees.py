@@ -38,57 +38,57 @@ def _prepare_worker_reply(client, prefix: str, reply: dict) -> None:
 
 # ── list / delete ────────────────────────────────────────────────────────────
 
-def test_list_employees_hides_embeddings(api_client, api_key_header, db_session):
+def test_list_employees_hides_embeddings(api_client, auth_header, db_session):
     db_session.add(Employee(first_name="Иван", external_id=7, file_id=3, embedding=b"\x00" * 8))
     db_session.commit()
 
-    resp = api_client.get("/employees/", headers=api_key_header)
+    resp = api_client.get("/employees/", headers=auth_header)
     assert resp.status_code == 200
     [emp] = resp.json()
     assert emp["first_name"] == "Иван"
     assert "embedding" not in emp
 
 
-def test_delete_employee(api_client, api_key_header, db_session):
+def test_delete_employee(api_client, auth_header, db_session):
     emp = Employee(first_name="Иван", embedding=b"\x00" * 8)
     db_session.add(emp)
     db_session.commit()
 
-    resp = api_client.delete(f"/employees/{emp.id}", headers=api_key_header)
+    resp = api_client.delete(f"/employees/{emp.id}", headers=auth_header)
     assert resp.json() == {"ok": True, "deleted_id": emp.id, "first_name": "Иван"}
-    assert api_client.delete(f"/employees/{emp.id}", headers=api_key_header).status_code == 404
+    assert api_client.delete(f"/employees/{emp.id}", headers=auth_header).status_code == 404
 
 
 # ── sync / add через очередь ─────────────────────────────────────────────────
 
-def test_sync_enqueues_job_and_returns_worker_result(api_client, api_key_header, fake_redis):
+def test_sync_enqueues_job_and_returns_worker_result(api_client, auth_header, fake_redis):
     reply = {"added": 2, "updated": 1, "skipped": 0, "errors": 0}
     _prepare_worker_reply(fake_redis, EMPLOYEE_SYNC_RESULT_PREFIX, reply)
 
-    resp = api_client.post("/employees/sync", headers=api_key_header)
+    resp = api_client.post("/employees/sync", headers=auth_header)
 
     assert resp.status_code == 200
     assert resp.json() == reply
     assert json.loads(fake_redis.lpop(EMPLOYEE_SYNC_JOBS)) == {"job_id": str(FIXED_JOB_ID)}
 
 
-def test_sync_worker_error_is_500(api_client, api_key_header, fake_redis):
+def test_sync_worker_error_is_500(api_client, auth_header, fake_redis):
     _prepare_worker_reply(fake_redis, EMPLOYEE_SYNC_RESULT_PREFIX, {"error": "HR down"})
-    resp = api_client.post("/employees/sync", headers=api_key_header)
+    resp = api_client.post("/employees/sync", headers=auth_header)
     assert resp.status_code == 500
     assert "HR down" in resp.json()["detail"]
 
 
-def test_sync_times_out_with_504_when_no_worker(api_client, api_key_header, fake_redis):
-    resp = api_client.post("/employees/sync", headers=api_key_header)
+def test_sync_times_out_with_504_when_no_worker(api_client, auth_header, fake_redis):
+    resp = api_client.post("/employees/sync", headers=auth_header)
     assert resp.status_code == 504
 
 
-def test_add_sends_payload_to_worker(api_client, api_key_header, fake_redis):
+def test_add_sends_payload_to_worker(api_client, auth_header, fake_redis):
     reply = {"id": 1, "external_id": 5, "first_name": "Анна", "file_id": 9, "created_at": None}
     _prepare_worker_reply(fake_redis, EMPLOYEE_ADD_RESULT_PREFIX, reply)
 
-    resp = api_client.post("/employees/add", headers=api_key_header,
+    resp = api_client.post("/employees/add", headers=auth_header,
                            json={"first_name": "Анна", "file_id": 9, "external_id": 5})
 
     assert resp.status_code == 200
@@ -102,9 +102,9 @@ def test_add_sends_payload_to_worker(api_client, api_key_header, fake_redis):
     ("Не удалось извлечь embedding лица", 422),
     ("Не удалось скачать или декодировать фото file_id=9", 502),
 ])
-def test_add_maps_worker_errors_to_status(api_client, api_key_header, fake_redis, message, status):
+def test_add_maps_worker_errors_to_status(api_client, auth_header, fake_redis, message, status):
     _prepare_worker_reply(fake_redis, EMPLOYEE_ADD_RESULT_PREFIX, {"error": message})
-    resp = api_client.post("/employees/add", headers=api_key_header,
+    resp = api_client.post("/employees/add", headers=auth_header,
                            json={"first_name": "Анна", "file_id": 9})
     assert resp.status_code == status
     assert resp.json()["detail"] == message

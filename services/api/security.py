@@ -30,7 +30,7 @@ REFRESH_TOKEN_DAYS = env_int("REFRESH_TOKEN_DAYS", 7)
 ACCESS, REFRESH = "access", "refresh"
 
 if len(JWT_SECRET) < 32:
-    # Как и с API_KEYS: без секрета сервис не стартует (fail secure).
+    # Без секрета сервис не стартует (fail secure), а не работает с открытым API.
     # Короткий секрет HS256 подбирается перебором по любому выданному токену.
     raise RuntimeError(
         "JWT_SECRET не задан или короче 32 символов. Сгенерируйте, например:\n"

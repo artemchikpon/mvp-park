@@ -22,7 +22,8 @@ pytest -v
 | Файл | Что тестирует |
 |---|---|
 | `test_stats_service.py` | Бизнес-логика аналитики: Live Occupancy, графики день/неделя/месяц, демография, группировка по возрасту, санитизация некорректных age/gender, ежедневный сброс галереи лиц (`reset_persons`) |
-| `test_auth.py` | API-key авторизация (`require_api_key`) — юнит + через реальные роуты |
+| `test_auth.py` | без токена — 401 на всех бизнес-роутах; схема OAuth2 в OpenAPI |
+| `test_jwt_auth.py` | JWT: пароли, токены, вход/refresh, роли admin/viewer, `/users`, первый admin |
 | `test_api_cameras_settings_persons.py` | CRUD камер, настройки парка, список/счётчик/ручной сброс (`POST /persons/reset`) уникальных лиц — через `TestClient` |
 | `test_api_employees.py` | Роутер `/employees`: список, удаление, `sync`/`add` через Redis-очередь (успех, ошибка воркера → 422/500/502, таймаут → 504) и обработка этих задач на стороне воркера (`employee_jobs`) |
 | `test_employee_sync.py` | Синхронизация с HR: добавление/обновление по `external_id`, подсчёт skipped/errors, тексты ошибок, на которые опирается API |

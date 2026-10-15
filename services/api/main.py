@@ -33,7 +33,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# /health и /auth (вход) — публичные. Бизнес-роутеры: JWT или X-API-Key;
+# /health и /auth (вход) — публичные. Бизнес-роутеры: только JWT;
 # viewer — только чтение, изменения — admin (см. auth.authorize).
 app.include_router(auth.router)
 for module in (cameras, stats, persons, settings, employees):

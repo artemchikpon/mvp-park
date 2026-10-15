@@ -57,4 +57,4 @@ def refresh(body: RefreshIn, db: Session = Depends(get_db)):
 
 @router.get("/me", response_model=MeOut, summary="Кто я: роль и пользователь текущего запроса")
 def me(principal: Principal = Depends(get_principal)):
-    return MeOut(role=principal.role, user_id=principal.user_id, username=principal.username)
+    return MeOut(user_id=principal.user_id, username=principal.username, role=principal.role)
