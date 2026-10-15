@@ -4,7 +4,10 @@
 часть проекта: чистые вычисления над БД, без сети/камер/ML.
 """
 
+import numpy as np
 from datetime import date, datetime, timedelta
+
+from core.timeutil import utcnow
 
 import pytest
 
@@ -40,7 +43,7 @@ def test_get_settings_creates_default_row_once(db_session):
     assert s1.id == 1
     assert s1.capacity == 5000
     assert s1.warning_threshold == 4500
-    assert s1.timezone == "UTC"
+    assert s1.timezone == "Asia/Tashkent"
 
     # повторный вызов не должен плодить новую строку
     s2 = svc.get_settings(db_session)
@@ -54,7 +57,7 @@ def test_update_settings_only_changes_provided_fields(db_session):
     assert updated.capacity == 5000
     # None-поля не переданы -> не меняются.
     assert updated.warning_threshold == 4500
-    assert updated.timezone == "UTC"
+    assert updated.timezone == "Asia/Tashkent"
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -89,7 +92,7 @@ def test_live_occupancy_basic_in_out_balance(db_session):
     cam_in = _make_camera(db_session, direction="in", name="In")
     cam_out = _make_camera(db_session, direction="out", name="Out")
 
-    now = datetime.utcnow()
+    now = utcnow()
     for i in range(5):
         _add_event(db_session, cam_in, now, person_id=i)
     for i in range(2):
@@ -107,7 +110,7 @@ def test_live_occupancy_never_negative_when_out_exceeds_in(db_session):
     даже если out > in (например, одна из камер входа была офлайн)."""
     svc.get_settings(db_session)
     cam_out = _make_camera(db_session, direction="out")
-    now = datetime.utcnow()
+    now = utcnow()
     for i in range(3):
         _add_event(db_session, cam_out, now, person_id=i)
 
@@ -118,7 +121,7 @@ def test_live_occupancy_never_negative_when_out_exceeds_in(db_session):
 def test_live_occupancy_status_thresholds(db_session):
     svc.update_settings(db_session, capacity=10, warning_threshold=8)
     cam_in = _make_camera(db_session, direction="in")
-    now = datetime.utcnow()
+    now = utcnow()
 
     for i in range(8):
         _add_event(db_session, cam_in, now, person_id=i)
@@ -132,7 +135,7 @@ def test_live_occupancy_status_thresholds(db_session):
 def test_live_occupancy_only_counts_today(db_session):
     svc.get_settings(db_session)
     cam_in = _make_camera(db_session, direction="in")
-    yesterday = datetime.utcnow() - timedelta(days=1, hours=1)
+    yesterday = utcnow() - timedelta(days=1, hours=1)
     _add_event(db_session, cam_in, yesterday, person_id=1)
 
     result = svc.get_live_occupancy(db_session)
@@ -144,7 +147,7 @@ def test_live_occupancy_filters_by_gate(db_session):
     svc.get_settings(db_session)
     cam_a = _make_camera(db_session, direction="in", gate="A")
     cam_b = _make_camera(db_session, direction="in", gate="B")
-    now = datetime.utcnow()
+    now = utcnow()
     _add_event(db_session, cam_a, now, person_id=1)
     _add_event(db_session, cam_a, now, person_id=2)
     _add_event(db_session, cam_b, now, person_id=3)
@@ -157,7 +160,8 @@ def test_live_occupancy_filters_by_gate(db_session):
 # ── day timeseries ───────────────────────────────────────────────────────────
 
 def test_day_timeseries_buckets_by_utc_hour_when_tz_is_utc(db_session):
-    svc.get_settings(db_session)  # timezone=UTC по умолчанию
+    svc.get_settings(db_session)
+    svc.update_settings(db_session, timezone="UTC")  # тест про часы в UTC
     cam_in = _make_camera(db_session, direction="in")
     today = date.today()
     ts_9am = datetime(today.year, today.month, today.day, 9, 15)
@@ -186,6 +190,7 @@ def test_day_timeseries_empty_day_has_no_peak(db_session):
 
 def test_day_timeseries_session_hours_only_when_out_after_in(db_session):
     svc.get_settings(db_session)
+    svc.update_settings(db_session, timezone="UTC")  # события ниже заданы в UTC
     cam_in = _make_camera(db_session, direction="in")
     cam_out = _make_camera(db_session, direction="out")
     today = date.today()
@@ -200,6 +205,23 @@ def test_day_timeseries_session_hours_only_when_out_after_in(db_session):
     assert result["peak_in_hour"] == 9
     assert result["peak_out_hour"] == 18
     assert result["estimated_session_hours"] == 9
+
+
+def test_day_timeseries_buckets_by_tashkent_hour_by_default(db_session):
+    """Парк по умолчанию в Ташкенте (UTC+5): событие в 04:15 UTC — это 9-й час
+    по местному времени, а сутки начинаются в 19:00 UTC предыдущего дня."""
+    settings = svc.get_settings(db_session)
+    assert settings.timezone == "Asia/Tashkent"
+    cam_in = _make_camera(db_session, direction="in")
+    day = date(2026, 10, 14)
+    _add_event(db_session, cam_in, datetime(2026, 10, 14, 4, 15), person_id=1)   # 09:15 Ташкент
+    _add_event(db_session, cam_in, datetime(2026, 10, 14, 4, 40), person_id=4)   # 09:40 Ташкент
+    _add_event(db_session, cam_in, datetime(2026, 10, 13, 19, 30), person_id=2)  # 00:30 Ташкент, тот же день
+    _add_event(db_session, cam_in, datetime(2026, 10, 13, 18, 59), person_id=3)  # 23:59 предыдущего дня
+
+    result = svc.get_day_timeseries(db_session, day)
+    assert result["peak_in_hour"] == 9
+    assert result["total_in"] == 3
 
 
 def test_day_timeseries_no_session_estimate_when_out_before_in(db_session):
@@ -279,7 +301,7 @@ def test_month_timeseries_ignores_out_direction_and_null_person(db_session):
     svc.get_settings(db_session)
     cam_in = _make_camera(db_session, direction="in")
     cam_out = _make_camera(db_session, direction="out")
-    today = datetime.utcnow()
+    today = utcnow()
 
     _add_event(db_session, cam_out, today, person_id=1)  # direction=out -> не считается
     _add_event(db_session, cam_in, today, person_id=None)  # person_id=None -> не считается
@@ -293,7 +315,7 @@ def test_month_timeseries_ignores_out_direction_and_null_person(db_session):
 def test_demographics_gender_and_age_group_breakdown(db_session):
     svc.get_settings(db_session)
     cam_in = _make_camera(db_session, direction="in")
-    now = datetime.utcnow()
+    now = utcnow()
 
     _add_event(db_session, cam_in, now, person_id=1, age=10, gender=1)   # kid, male
     _add_event(db_session, cam_in, now, person_id=2, age=30, gender=0)   # adult, female
@@ -315,7 +337,7 @@ def test_demographics_gender_and_age_group_breakdown(db_session):
 def test_demographics_excludes_out_direction(db_session):
     svc.get_settings(db_session)
     cam_out = _make_camera(db_session, direction="out")
-    now = datetime.utcnow()
+    now = utcnow()
     _add_event(db_session, cam_out, now, person_id=1, age=25, gender=1)
 
     start, end = svc.period_bounds(db_session, "day", now.date())
@@ -351,7 +373,7 @@ def test_record_crossing_keeps_valid_zero_age_and_gender(db_session):
 
 # ── reset_persons (ежедневный сброс галереи лиц) ────────────────────────────
 
-def _make_person(db_session, embedding=b"\x00" * 8):
+def _make_person(db_session, embedding=np.full(512, 0, np.float32)):
     p = Person(embedding=embedding, age=30, gender=1)
     db_session.add(p)
     db_session.commit()
@@ -375,7 +397,7 @@ def test_reset_persons_nulls_person_id_on_existing_crossing_events(db_session):
     отвязать её от больше не существующих Person, иначе FK был бы нарушен."""
     cam = _make_camera(db_session, direction="in")
     person = _make_person(db_session)
-    event = _add_event(db_session, cam, datetime.utcnow(), person_id=person.id)
+    event = _add_event(db_session, cam, utcnow(), person_id=person.id)
 
     svc.reset_persons(db_session)
 

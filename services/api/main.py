@@ -1,14 +1,19 @@
-import os
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Depends
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api import routers
-from api.routers import cameras, stats, persons, settings, employees
-from api.auth import require_api_key
+from api.auth import authorize, require_admin
+from api.bootstrap import ensure_initial_admin
+from api.config import CORS_ORIGINS, ENABLE_DOCS
+from api.routers import auth, cameras, employees, persons, settings, stats, users
 
 
-ENABLE_DOCS = os.environ.get("ENABLE_DOCS", "false").lower() == "true"
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    ensure_initial_admin()
+    yield
+
 
 app = FastAPI(
     title="Park Tracker API",
@@ -17,28 +22,23 @@ app = FastAPI(
     docs_url="/docs" if ENABLE_DOCS else None,
     redoc_url="/redoc" if ENABLE_DOCS else None,
     openapi_url="/openapi.json" if ENABLE_DOCS else None,
+    lifespan=lifespan,
 )
 
-# CORS для отдельного dashboard/frontend. В production задайте CORS_ORIGINS
-# через .env, например: https://dashboard.example.com,https://admin.example.com
-_cors_origins = [x.strip() for x in os.environ.get("CORS_ORIGINS", "*").split(",") if x.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins,
+    allow_origins=CORS_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# /health остаётся публичным (нужен для docker healthcheck / балансировщика),
-# все остальные роутеры требуют X-API-Key.
-_auth = [Depends(require_api_key)]
-
-app.include_router(cameras.router, dependencies=_auth)
-app.include_router(stats.router, dependencies=_auth)
-app.include_router(persons.router, dependencies=_auth)
-app.include_router(settings.router, dependencies=_auth)
-app.include_router(employees.router, dependencies=_auth)
+# /health и /auth (вход) — публичные. Бизнес-роутеры: только JWT;
+# viewer — только чтение, изменения — admin (см. auth.authorize).
+app.include_router(auth.router)
+for module in (cameras, stats, persons, settings, employees):
+    app.include_router(module.router, dependencies=[Depends(authorize)])
+app.include_router(users.router, dependencies=[Depends(require_admin)])
 
 
 @app.get("/health", tags=["system"])

@@ -1,35 +1,90 @@
 """
-Простая API-key авторизация для всех эндпоинтов.
+Авторизация API: только JWT (Authorization: Bearer <access-токен>).
 
-Ключ передаётся в заголовке X-API-Key. Сравнение через secrets.compare_digest,
-чтобы не течь через timing-атаку. Ключ(и) задаются переменной окружения
-API_KEYS (через запятую, можно несколько — например, для разных клиентов
-дашборда / интеграций).
+Токен выдаёт POST /auth/login по логину и паролю пользователя из таблицы
+users (см. routers/auth.py). Роли:
+  admin  — всё: камеры, настройки, сотрудники, пользователи;
+  viewer — только чтение (GET): статистика, списки, настройки.
 
-Если API_KEYS не задана — сервис не стартует с "открытым" API по умолчанию,
-а падает с понятной ошибкой (fail secure, а не fail open).
+Роль и активность пользователя читаются из БД на каждом запросе, поэтому
+отключение пользователя или смена роли действуют сразу, а не после
+истечения токена. Без JWT_SECRET сервис не стартует (см. security.py).
+
+В Swagger (/docs) — кнопка Authorize: логин и пароль (OAuth2 password).
 """
 
-import os
-import secrets
-from fastapi import Header, HTTPException, status
+from dataclasses import dataclass
 
-_raw = os.environ.get("API_KEYS", "")
-API_KEYS = {k.strip() for k in _raw.split(",") if k.strip()}
+from fastapi import Depends, HTTPException, Request, Security, status
+from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy.orm import Session
 
-if not API_KEYS:
-    raise RuntimeError(
-        "API_KEYS не задана. Укажите хотя бы один ключ через переменную "
-        "окружения API_KEYS (можно несколько через запятую), например:\n"
-        "  API_KEYS=change-me-please-1234567890"
+from api import security
+from api.deps import get_db
+from db.models import User
+
+ADMIN, VIEWER = "admin", "viewer"
+READ_ONLY_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+# auto_error=False: отсутствие токена обрабатываем сами — с понятным текстом.
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="auth/login",
+    auto_error=False,
+    description="Логин и пароль пользователя (таблица users)",
+)
+
+
+@dataclass(frozen=True)
+class Principal:
+    """Кто выполняет запрос."""
+    user_id: int
+    username: str
+    role: str
+
+
+def _unauthorized(detail: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail=detail,
+        headers={"WWW-Authenticate": "Bearer"},
     )
 
 
-def require_api_key(x_api_key: str | None = Header(default=None)) -> None:
-    if x_api_key is None or not any(
-        secrets.compare_digest(x_api_key, key) for key in API_KEYS
-    ):
+def active_user(db: Session, user_id: int) -> User | None:
+    user = db.get(User, user_id)
+    return user if user is not None and user.is_active else None
+
+
+def get_principal(
+    token: str | None = Security(oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> Principal:
+    if token is None:
+        raise _unauthorized("Требуется авторизация: Authorization: Bearer <токен> (POST /auth/login)")
+    try:
+        user_id = security.decode_token(token, security.ACCESS)
+    except security.InvalidToken:
+        raise _unauthorized("Токен недействителен или истёк — войдите заново или обновите токен")
+    user = active_user(db, user_id)
+    if user is None:
+        raise _unauthorized("Пользователь не найден или отключён")
+    return Principal(user_id=user.id, username=user.username, role=user.role)
+
+
+def authorize(request: Request, principal: Principal = Depends(get_principal)) -> Principal:
+    """Для бизнес-роутеров: viewer — только чтение, остальное — admin."""
+    if request.method not in READ_ONLY_METHODS and principal.role != ADMIN:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Неверный или отсутствующий API-ключ (заголовок X-API-Key)",
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Недостаточно прав: изменять данные может только admin",
         )
+    return principal
+
+
+def require_admin(principal: Principal = Depends(get_principal)) -> Principal:
+    if principal.role != ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Недостаточно прав: нужна роль admin",
+        )
+    return principal

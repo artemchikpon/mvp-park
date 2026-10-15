@@ -1,136 +1,29 @@
-import json
-import logging
-import os
-import uuid
-import numpy as np
-import httpx
-import cv2
+"""Сотрудники: их лица не учитываются в статистике посетителей.
+
+Эмбеддинги считает worker (там есть InsightFace); api только ставит задачи
+через Redis (см. api/worker_jobs.py) и работает с таблицей employees.
+"""
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from typing import Optional
-from datetime import datetime
 
-from db.database import SessionLocal
+from api.deps import get_db
+from api.schemas import AddEmployeeRequest, EmployeeOut, SyncResult
+from api.config import EMPLOYEE_JOB_TIMEOUT
+from api.worker_jobs import (
+    EnqueueError, WaitError, WorkerJobError, WorkerTimeout, run_worker_job,
+)
+from core.redis_keys import (
+    EMPLOYEE_ADD_JOBS, EMPLOYEE_ADD_RESULT_PREFIX, EMPLOYEE_SYNC_JOBS,
+    EMPLOYEE_SYNC_RESULT_PREFIX,
+)
 from db.models import Employee
-
-log = logging.getLogger("employees_router")
 
 router = APIRouter(prefix="/employees", tags=["employees"])
 
-HR_BASE = os.environ.get("HR_API_BASE", "https://central-park.rzbtech.uz").rstrip("/")
-SSL_VERIFY = os.environ.get("HR_SSL_VERIFY", "true").lower() != "false"
-SIMILARITY = 0.65
-EMB_DTYPE = np.float32
+# Фразы из ошибок воркера, означающие "проблема в самом фото" -> 422.
+_BAD_PHOTO_MARKERS = ("Лицо не найдено", "embedding")
 
-# ── Синхронизация сотрудников выполняется в worker-сервисе (там есть
-# ML-зависимости face_engine/insightface). api-сервис их не тащит, чтобы не
-# раздувать образ, а вместо этого кладёт задачу в Redis-очередь и ждёт
-# результат от воркера. ────────────────────────────────────────────────────
-REDIS_HOST = os.environ.get("REDIS_HOST", "redis")
-REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
-EMPLOYEE_SYNC_JOBS_KEY = "employee_sync_jobs"
-EMPLOYEE_ADD_JOBS_KEY = "employee_add_jobs"
-EMPLOYEE_SYNC_TIMEOUT = int(os.environ.get("EMPLOYEE_SYNC_TIMEOUT", "120"))
-
-def _redis_client():
-    # Redis нужен только для /employees/sync. Не импортируем клиент на уровне
-    # модуля, чтобы обычные API endpoints не зависели от redis-пакета при
-    # старте/тестировании.
-    import redis
-    return redis.Redis(
-        host=REDIS_HOST,
-        port=REDIS_PORT,
-        decode_responses=True,
-        socket_timeout=EMPLOYEE_SYNC_TIMEOUT + 5,
-        socket_connect_timeout=5,
-    )
-
-
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-
-class EmployeeOut(BaseModel):
-    id: int
-    external_id: Optional[int]
-    first_name: str
-    file_id: Optional[int]
-    created_at: Optional[datetime]
-
-    model_config = {"from_attributes": True}
-
-
-class AddEmployeeRequest(BaseModel):
-    first_name: str
-    file_id: int
-    external_id: Optional[int] = None
-
-
-class SyncResult(BaseModel):
-    added: int
-    updated: int
-    skipped: int
-    errors: int
-
-
-
-def _emb_to_bytes(vec: np.ndarray) -> bytes:
-    return vec.astype(EMB_DTYPE).tobytes()
-
-
-def _fetch_frame_from_file(file_id: int) -> np.ndarray:
-    url = f"{HR_BASE}/api/v1/files/{file_id}/view"
-    try:
-        resp = httpx.get(url, verify=SSL_VERIFY, timeout=15)
-        resp.raise_for_status()
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(
-            status_code=502,
-            detail=f"HR API вернул ошибку для file_id={file_id}: {e.response.status_code}"
-        )
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Не удалось скачать фото: {e}")
-
-    img_array = np.frombuffer(resp.content, dtype=np.uint8)
-    frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
-    if frame is None:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Не удалось декодировать изображение file_id={file_id}"
-        )
-    return frame
-
-
-def _extract_embedding(frame: np.ndarray) -> np.ndarray:
-    try:
-        from face_engine import extract_faces
-    except ImportError:
-        raise HTTPException(
-            status_code=503,
-            detail="face_engine недоступен в этом сервисе. "
-                   "Используйте POST /employees/sync через worker."
-        )
-
-    faces = extract_faces(frame)
-    if not faces:
-        raise HTTPException(
-            status_code=422,
-            detail="Лицо не найдено на фотографии. Убедитесь что фото чёткое и лицо хорошо видно."
-        )
-
-    face = faces[0]
-    if face.embedding is None:
-        raise HTTPException(status_code=422, detail="Не удалось извлечь embedding лица")
-
-    return face.embedding
 
 @router.get("/", response_model=list[EmployeeOut], summary="Список сотрудников")
 def list_employees(db: Session = Depends(get_db)):
@@ -147,95 +40,52 @@ def sync_employees_route():
     один из worker-реплик её забирает, выполняет sync_employees() и кладёт
     результат обратно в Redis по ключу задания — а мы его ждём (blpop).
     """
-    job_id = str(uuid.uuid4())
-    result_key = f"employee_sync_result:{job_id}"
-
-    import redis
-    redis_client = _redis_client()
     try:
-        redis_client.rpush(EMPLOYEE_SYNC_JOBS_KEY, json.dumps({"job_id": job_id}))
-    except redis.exceptions.RedisError as e:
+        return run_worker_job(EMPLOYEE_SYNC_JOBS, EMPLOYEE_SYNC_RESULT_PREFIX)
+    except EnqueueError as e:
         raise HTTPException(
             status_code=503,
-            detail=f"Не удалось поставить задачу синхронизации в очередь (Redis недоступен): {e}"
+            detail=f"Не удалось поставить задачу синхронизации в очередь (Redis недоступен): {e}",
         )
-
-    try:
-        response = redis_client.blpop(result_key, timeout=EMPLOYEE_SYNC_TIMEOUT)
-    except redis.exceptions.RedisError as e:
+    except WaitError as e:
         raise HTTPException(
             status_code=503,
-            detail=f"Ошибка ожидания результата синхронизации (Redis недоступен): {e}"
+            detail=f"Ошибка ожидания результата синхронизации (Redis недоступен): {e}",
         )
-
-    if response is None:
+    except WorkerTimeout:
         raise HTTPException(
             status_code=504,
             detail=(
-                f"Worker не ответил за {EMPLOYEE_SYNC_TIMEOUT} сек. "
+                f"Worker не ответил за {EMPLOYEE_JOB_TIMEOUT} сек. "
                 "Проверьте что worker-сервис запущен и подключён к Redis."
-            )
+            ),
         )
-
-    _, payload = response
-    data = json.loads(payload)
-
-    if "error" in data:
-        raise HTTPException(status_code=500, detail=f"Ошибка синхронизации в worker: {data['error']}")
-
-    return data
+    except WorkerJobError as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка синхронизации в worker: {e.message}")
 
 
 @router.post("/add", response_model=EmployeeOut, summary="Добавить сотрудника вручную")
 def add_employee(body: AddEmployeeRequest):
     """Отправляет задачу в worker, где доступны face_engine/InsightFace."""
-    import redis
-
-    job_id = str(uuid.uuid4())
-    result_key = f"employee_add_result:{job_id}"
-    redis_client = _redis_client()
-    payload = json.dumps({
-        "job_id": job_id,
-        "first_name": body.first_name,
-        "file_id": body.file_id,
-        "external_id": body.external_id,
-    })
-
     try:
-        redis_client.rpush(EMPLOYEE_ADD_JOBS_KEY, payload)
-        response = redis_client.blpop(result_key, timeout=EMPLOYEE_SYNC_TIMEOUT)
-    except redis.exceptions.RedisError as e:
+        return run_worker_job(EMPLOYEE_ADD_JOBS, EMPLOYEE_ADD_RESULT_PREFIX, body.model_dump())
+    except (EnqueueError, WaitError) as e:
         raise HTTPException(status_code=503, detail=f"Redis недоступен: {e}") from e
-
-    if response is None:
+    except WorkerTimeout:
         raise HTTPException(
             status_code=504,
-            detail=f"Worker не ответил за {EMPLOYEE_SYNC_TIMEOUT} сек.",
+            detail=f"Worker не ответил за {EMPLOYEE_JOB_TIMEOUT} сек.",
         )
-
-    _, payload_raw = response
-    data = json.loads(payload_raw)
-    if "error" in data:
-        message = data["error"]
-        if "Лицо не найдено" in message or "embedding" in message:
-            raise HTTPException(status_code=422, detail=message)
-        raise HTTPException(status_code=502, detail=message)
-
-    return data
+    except WorkerJobError as e:
+        status = 422 if any(m in e.message for m in _BAD_PHOTO_MARKERS) else 502
+        raise HTTPException(status_code=status, detail=e.message)
 
 
-@router.delete(
-    "/{employee_id}",
-    summary="Удалить сотрудника и его векторы из БД",
-)
+@router.delete("/{employee_id}", summary="Удалить сотрудника и его векторы из БД")
 def delete_employee(employee_id: int, db: Session = Depends(get_db)):
-
-    emp = db.query(Employee).filter(Employee.id == employee_id).first()
+    emp = db.get(Employee, employee_id)
     if not emp:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Сотрудник id={employee_id} не найден"
-        )
+        raise HTTPException(status_code=404, detail=f"Сотрудник id={employee_id} не найден")
 
     name = emp.first_name
     db.delete(emp)

@@ -6,6 +6,7 @@ COPY shared/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY shared/db ./db
+COPY shared/core ./core
 COPY shared/migrations ./migrations
 COPY shared/alembic.ini .
 

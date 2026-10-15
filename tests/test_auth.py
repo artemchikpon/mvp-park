@@ -1,57 +1,35 @@
 """
-Тесты авторизации API (services/api/auth.py) — тот самый патч, закрывший
-полностью открытый API (см. предыдущий разбор проблем проекта).
+Тесты авторизации API (services/api/auth.py): все бизнес-роуты закрыты,
+войти можно только по JWT. Подробные сценарии JWT — в test_jwt_auth.py.
 """
 
 import pytest
-from fastapi import HTTPException
-
-from api.auth import require_api_key
 
 
-def test_require_api_key_accepts_valid_key():
-    # Не должно бросать исключение
-    require_api_key(x_api_key="test-key-1")
-    require_api_key(x_api_key="test-key-2")
-
-
-def test_require_api_key_rejects_missing_header():
-    with pytest.raises(HTTPException) as exc_info:
-        require_api_key(x_api_key=None)
-    assert exc_info.value.status_code == 401
-
-
-def test_require_api_key_rejects_wrong_key():
-    with pytest.raises(HTTPException) as exc_info:
-        require_api_key(x_api_key="totally-wrong-key")
-    assert exc_info.value.status_code == 401
-
-
-def test_require_api_key_rejects_empty_string():
-    with pytest.raises(HTTPException):
-        require_api_key(x_api_key="")
-
-
-# ── интеграционные проверки через реальные роуты FastAPI ───────────────────
-
-def test_health_is_public_without_key(api_client):
+def test_health_is_public(api_client):
     resp = api_client.get("/health")
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
 
 
-def test_protected_route_rejects_request_without_key(api_client):
+def test_protected_route_rejects_request_without_token(api_client):
     resp = api_client.get("/cameras/")
     assert resp.status_code == 401
+    assert resp.headers["WWW-Authenticate"] == "Bearer"
 
 
-def test_protected_route_rejects_wrong_key(api_client):
-    resp = api_client.get("/cameras/", headers={"X-API-Key": "nope"})
+def test_protected_route_rejects_garbage_token(api_client):
+    resp = api_client.get("/cameras/", headers={"Authorization": "Bearer nope"})
     assert resp.status_code == 401
 
 
-def test_protected_route_accepts_valid_key(api_client, api_key_header):
-    resp = api_client.get("/cameras/", headers=api_key_header)
+def test_api_key_header_no_longer_grants_access(api_client):
+    resp = api_client.get("/cameras/", headers={"X-API-Key": "test-key-1"})
+    assert resp.status_code == 401
+
+
+def test_protected_route_accepts_valid_token(api_client, auth_header):
+    resp = api_client.get("/cameras/", headers=auth_header)
     assert resp.status_code == 200
     assert resp.json() == []
 
@@ -64,8 +42,26 @@ def test_protected_route_accepts_valid_key(api_client, api_key_header):
         ("GET", "/employees/"),
         ("GET", "/settings/"),
         ("GET", "/stats/live"),
+        ("GET", "/users/"),
+        ("GET", "/auth/me"),
     ],
 )
-def test_all_business_routes_require_key(api_client, method, path):
+def test_all_business_routes_require_auth(api_client, method, path):
     resp = api_client.request(method, path)
-    assert resp.status_code == 401, f"{method} {path} должен требовать X-API-Key"
+    assert resp.status_code == 401, f"{method} {path} должен требовать JWT"
+
+
+# ── Swagger: кнопка Authorize ────────────────────────────────────────────────
+
+def test_openapi_declares_only_oauth2_scheme(api_client):
+    from api.main import app
+
+    schema = app.openapi()
+    schemes = schema["components"]["securitySchemes"]
+    assert list(schemes) == ["OAuth2PasswordBearer"]
+    assert schemes["OAuth2PasswordBearer"]["type"] == "oauth2"
+    assert schemes["OAuth2PasswordBearer"]["flows"]["password"]["tokenUrl"] == "auth/login"
+    # защищённые роуты ссылаются на схему, публичные /health и /auth/login — нет
+    assert schema["paths"]["/cameras/"]["get"]["security"] == [{"OAuth2PasswordBearer": []}]
+    assert "security" not in schema["paths"]["/health"]["get"]
+    assert "security" not in schema["paths"]["/auth/login"]["post"]

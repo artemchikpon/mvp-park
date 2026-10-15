@@ -1,11 +1,21 @@
+from datetime import datetime
+from typing import Literal, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from pydantic import BaseModel, field_validator, model_validator
-from typing import Optional, Literal
-from datetime import datetime, date
 
 
 # ── Cameras ──────────────────────────────────────────────────────────────────
 
 Direction = Literal["in", "out"]
+
+
+def _strip_non_empty_url(v: str | None) -> str | None:
+    if v is None:
+        return None
+    if not v.strip():
+        raise ValueError("url не может быть пустым")
+    return v.strip()
 
 
 class CameraCreate(BaseModel):
@@ -15,12 +25,7 @@ class CameraCreate(BaseModel):
     gate: Optional[str] = None    # группа/точка, напр. "Центральный", "Второй (МОРЕ)"
     active: bool = True
 
-    @field_validator("url")
-    @classmethod
-    def url_not_empty(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("url не может быть пустым")
-        return v.strip()
+    _url = field_validator("url")(_strip_non_empty_url)
 
 
 class CameraUpdate(BaseModel):
@@ -30,15 +35,7 @@ class CameraUpdate(BaseModel):
     gate: Optional[str] = None
     active: Optional[bool] = None
 
-    @field_validator("url")
-    @classmethod
-    def url_not_empty(cls, v: str | None) -> str | None:
-        if v is None:
-            return None
-        if not v.strip():
-            raise ValueError("url не может быть пустым")
-        return v.strip()
-
+    _url = field_validator("url")(_strip_non_empty_url)
 
 
 class CameraOut(BaseModel):
@@ -149,7 +146,6 @@ class ParkSettingsUpdate(BaseModel):
         if not value:
             raise ValueError("timezone не может быть пустым")
         try:
-            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
             ZoneInfo(value)
         except (ZoneInfoNotFoundError, ValueError):
             raise ValueError(f"Невалидная timezone: {value}")
@@ -171,5 +167,94 @@ class PersonOut(BaseModel):
     gender: Optional[int]          # 1=male, 0=female
     first_seen: Optional[datetime]
     last_seen: Optional[datetime]
+
+    model_config = {"from_attributes": True}
+
+
+# ── Employees ─────────────────────────────────────────────────────────────────
+
+class EmployeeOut(BaseModel):
+    id: int
+    external_id: Optional[int]
+    first_name: str
+    file_id: Optional[int]
+    created_at: Optional[datetime]
+
+    model_config = {"from_attributes": True}
+
+
+class AddEmployeeRequest(BaseModel):
+    first_name: str
+    file_id: int
+    external_id: Optional[int] = None
+
+
+class SyncResult(BaseModel):
+    added: int
+    updated: int
+    skipped: int
+    errors: int
+
+
+# ── Auth / Users ─────────────────────────────────────────────────────────────
+
+Role = Literal["admin", "viewer"]
+
+
+class TokenPair(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int               # срок жизни access-токена, секунд
+
+
+class RefreshIn(BaseModel):
+    refresh_token: str
+
+
+class MeOut(BaseModel):
+    user_id: int
+    username: str
+    role: Role
+
+
+def _check_username(v: str | None) -> str | None:
+    if v is None:
+        return None
+    v = v.strip()
+    if not 3 <= len(v) <= 64:
+        raise ValueError("username: от 3 до 64 символов")
+    return v
+
+
+def _check_password(v: str | None) -> str | None:
+    if v is not None and len(v) < 8:
+        raise ValueError("пароль: не короче 8 символов")
+    return v
+
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+    role: Role = "viewer"
+
+    _username = field_validator("username")(_check_username)
+    _password = field_validator("password")(_check_password)
+
+
+class UserUpdate(BaseModel):
+    password: Optional[str] = None
+    role: Optional[Role] = None
+    is_active: Optional[bool] = None
+
+    _password = field_validator("password")(_check_password)
+
+
+class UserOut(BaseModel):
+    id: int
+    username: str
+    role: Role
+    is_active: bool
+    created_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}

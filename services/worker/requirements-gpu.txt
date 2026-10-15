@@ -1,0 +1,20 @@
+# GPU-сборка воркера (services/worker/Dockerfile.gpu) ставится ПОВЕРХ
+# requirements.txt: обычный onnxruntime удаляется и заменяется на
+# onnxruntime-gpu (оба пакета пишут в один модуль onnxruntime и конфликтуют,
+# а insightface тянет именно onnxruntime).
+#
+# Версии закреплены осознанно:
+# - onnxruntime-gpu 1.26.0 — последняя сборка под CUDA 12 (с 1.27 — CUDA 13,
+#   ей нужен драйвер NVIDIA >= 580);
+# - библиотеки CUDA/cuDNN из pip (без тяжёлого базового образа nvidia/cuda)
+#   версии CUDA 12.6 — работают с драйверами, поддерживающими CUDA >= 12.6
+#   (проверено: RTX 4050, драйвер 566.26 / CUDA 12.7). На хосте нужны только
+#   драйвер NVIDIA и NVIDIA Container Toolkit (в Docker Desktop — WSL2).
+onnxruntime-gpu==1.26.0
+nvidia-cuda-runtime-cu12==12.6.77
+nvidia-cuda-nvrtc-cu12==12.6.77
+nvidia-cublas-cu12==12.6.4.1
+nvidia-cufft-cu12==11.3.0.4
+nvidia-curand-cu12==10.3.7.77
+nvidia-nvjitlink-cu12==12.6.85
+nvidia-cudnn-cu12==9.10.2.21

@@ -1,83 +1,119 @@
 from sqlalchemy import (
-    Column, Integer, String, Date, DateTime, LargeBinary, Boolean, Text,
-    ForeignKey, Index, CheckConstraint,
+    Boolean, CheckConstraint, Column, DateTime, ForeignKey, Index, Integer,
+    String, Text, true,
 )
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import relationship
+
+from core.timeutil import DEFAULT_PARK_TIMEZONE, utcnow
 from db.database import Base
-from datetime import datetime
+
+_DIRECTION_CHECK = "direction in ('in','out')"
+
+# Размер вектора лица InsightFace (buffalo_sc, w600k_mbf). Векторы хранятся в
+# колонках pgvector `vector(512)`: поиск похожего лица идёт прямо в Postgres
+# (оператор <=>, косинусное расстояние), см. worker/recognition/face_storage.py.
+EMBEDDING_DIM = 512
 
 
 class Camera(Base):
-
     __tablename__ = "cameras"
 
     id = Column(Integer, primary_key=True)
     name = Column(String(128), nullable=False)          # "Вход северный"
     url = Column(Text, nullable=False)                  # rtsp://...
-    direction = Column(String(3), nullable=False)        # 'in' | 'out'
-    gate = Column(String(128), nullable=True)            # "Центральный", "Второй (МОРЕ)" ...
-    active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    direction = Column(String(3), nullable=False)       # 'in' | 'out'
+    gate = Column(String(128), nullable=True)           # "Центральный", "Второй (МОРЕ)" ...
+    active = Column(Boolean, default=True, nullable=False, server_default=true())
+    created_at = Column(DateTime, default=utcnow)
 
     __table_args__ = (
-        CheckConstraint("direction in ('in','out')", name="ck_camera_direction"),
+        CheckConstraint(_DIRECTION_CHECK, name="ck_camera_direction"),
     )
 
 
 class Person(Base):
-    """Уникальное лицо — сохраняется один раз при первом появлении"""
+    """Уникальное лицо в рабочей галерее распознавания (очищается раз в сутки)."""
     __tablename__ = "persons"
 
     id = Column(Integer, primary_key=True)
-    embedding = Column(LargeBinary, nullable=False)     # усреднённый вектор (bytes)
+    embedding = Column(Vector(EMBEDDING_DIM), nullable=False)
     age = Column(Integer)
     gender = Column(Integer)                            # 1=male, 0=female
-    first_seen = Column(DateTime, default=datetime.utcnow)
-    last_seen = Column(DateTime, default=datetime.utcnow)
+    first_seen = Column(DateTime, default=utcnow)
+    last_seen = Column(DateTime, default=utcnow)
 
 
 class CrossingEvent(Base):
-
+    """Одно пересечение линии Вход/Выход одним человеком на одной камере."""
     __tablename__ = "crossing_events"
 
     id = Column(Integer, primary_key=True)
     camera_id = Column(Integer, ForeignKey("cameras.id"), nullable=False)
-    direction = Column(String(3), nullable=False)        # 'in' | 'out' (снэпшот камеры)
-    gate = Column(String(128), nullable=True)             # снэпшот камеры
+    direction = Column(String(3), nullable=False)       # снэпшот камеры
+    gate = Column(String(128), nullable=True)           # снэпшот камеры
     person_id = Column(Integer, ForeignKey("persons.id", ondelete="SET NULL"), nullable=True)
-    age = Column(Integer, nullable=True)                  # возраст в момент пересечения
-    gender = Column(Integer, nullable=True)               # пол в момент пересечения
-    ts = Column(DateTime, default=datetime.utcnow, nullable=False)
+    age = Column(Integer, nullable=True)                # возраст в момент пересечения
+    gender = Column(Integer, nullable=True)             # пол в момент пересечения
+    ts = Column(DateTime, default=utcnow, nullable=False)
 
     camera = relationship("Camera")
     person = relationship("Person")
 
     __table_args__ = (
-        CheckConstraint("direction in ('in','out')", name="ck_event_direction"),
+        CheckConstraint(_DIRECTION_CHECK, name="ck_event_direction"),
         Index("ix_crossing_events_ts", "ts"),
         Index("ix_crossing_events_camera_ts", "camera_id", "ts"),
         Index("ix_crossing_events_direction_ts", "direction", "ts"),
+        Index("ix_crossing_events_person_ts", "person_id", "ts"),  # миграция 006
     )
 
 
 class Employee(Base):
-
+    """Сотрудник из HR-системы: его лицо не учитывается в статистике."""
     __tablename__ = "employees"
 
     id = Column(Integer, primary_key=True)
     external_id = Column(Integer, nullable=True, unique=True)   # id в HR
     first_name = Column(String(128), nullable=False)
     file_id = Column(Integer, nullable=True)
-    embedding = Column(LargeBinary, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    embedding = Column(Vector(EMBEDDING_DIM), nullable=False)
+    created_at = Column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        Index("ix_employees_external_id", "external_id"),  # миграция 005
+    )
 
 
 class ParkSettings(Base):
-
+    """Singleton-строка (id=1) с настройками парка."""
     __tablename__ = "park_settings"
 
     id = Column(Integer, primary_key=True)
     capacity = Column(Integer, nullable=False, default=5000)
     warning_threshold = Column(Integer, nullable=False, default=4500)
-    timezone = Column(String(64), nullable=False, default="UTC")
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    timezone = Column(String(64), nullable=False, default=DEFAULT_PARK_TIMEZONE)
+    updated_at = Column(DateTime, default=utcnow)
+
+
+USER_ROLES = ("admin", "viewer")
+
+
+class User(Base):
+    """Пользователь администрации для входа в API по JWT.
+
+    admin — полный доступ (камеры, настройки, сотрудники, пользователи);
+    viewer — только чтение (GET). Пароль хранится только как хэш.
+    """
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True)
+    username = Column(String(64), nullable=False, unique=True)
+    password_hash = Column(String(255), nullable=False)
+    role = Column(String(16), nullable=False, default="viewer")
+    is_active = Column(Boolean, nullable=False, default=True, server_default=true())
+    created_at = Column(DateTime, default=utcnow)
+
+    __table_args__ = (
+        CheckConstraint("role in ('admin','viewer')", name="ck_users_role"),
+    )

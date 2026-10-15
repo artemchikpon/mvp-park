@@ -1,24 +1,15 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from typing import List, Optional
 
-from db.database import SessionLocal
-from db.models import Person
-from db import stats_service as svc
+from api.deps import get_db
 from api.schemas import PersonOut
+from db import stats_service as svc
+from db.models import Person
 
 router = APIRouter(prefix="/persons", tags=["persons"])
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-@router.get("/", response_model=List[PersonOut], summary="Список уникальных лиц")
+@router.get("/", response_model=list[PersonOut], summary="Список уникальных лиц")
 def list_persons(
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -42,7 +33,7 @@ def count_persons(db: Session = Depends(get_db)):
     "/reset",
     summary="Немедленно очистить галерею уникальных лиц (persons)",
     description=(
-        "Ручной аналог автоматического ежедневного сброса (12:00 по "
+        "Ручной аналог автоматического ежедневного сброса (00:00 по "
         "таймзоне парка, см. worker._persons_reset_loop). История "
         "пересечений (crossing_events) не удаляется, только теряет "
         "ссылку на удалённый person_id."

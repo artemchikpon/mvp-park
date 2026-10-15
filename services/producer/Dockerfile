@@ -10,6 +10,7 @@ COPY services/producer/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY shared/db ./db
+COPY shared/core ./core
 COPY services/producer ./producer
 
 ENV PYTHONPATH=/app

@@ -1,0 +1,27 @@
+# Воркер с InsightFace на видеокарте NVIDIA (FACE_DEVICE=gpu).
+# Код тот же, что у CPU-воркера; отличается только onnxruntime.
+# Запуск: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y \
+    libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY services/worker/requirements.txt services/worker/requirements-gpu.txt ./
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip uninstall -y onnxruntime onnxruntime-gpu \
+    && pip install --no-cache-dir --force-reinstall --no-deps onnxruntime-gpu==1.26.0 \
+    && pip install --no-cache-dir -r requirements-gpu.txt \
+    && python -c "import onnxruntime as o; assert 'CUDAExecutionProvider' in o.get_available_providers(), o.get_available_providers()"
+
+COPY shared/db ./db
+COPY shared/core ./core
+COPY services/worker ./worker
+
+ENV PYTHONPATH=/app:/app/worker
+ENV PYTHONUNBUFFERED=1
+ENV FACE_DEVICE=gpu
+
+CMD ["python", "worker/worker.py"]
