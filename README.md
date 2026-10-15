@@ -122,7 +122,7 @@ cd shared && DATABASE_URL=postgresql://face:face@localhost:5432/face_db \
 
 Векторы лиц (`persons.embedding`, `employees.embedding`) хранятся в колонках
 `vector(512)` расширения [pgvector](https://github.com/pgvector/pgvector);
-Postgres в compose — образ `pgvector/pgvector:0.8.0-pg15`. Самое похожее лицо
+Postgres в compose — образ `pgvector/pgvector:0.8.1-pg15-trixie`. Самое похожее лицо
 ищется прямо в базе:
 
 ```sql

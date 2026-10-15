@@ -8,7 +8,7 @@ Create Date: 2026-10-15
 сырые байты float32, и искать похожее лицо приходилось в Python у каждого
 воркера. Теперь колонки — pgvector `vector(512)`, поиск идёт в Postgres
 (оператор <=>). Требует образ Postgres с расширением pgvector
-(docker-compose: pgvector/pgvector:0.8.0-pg15).
+(docker-compose: pgvector/pgvector:0.8.1-pg15-trixie).
 
 Существующие строки конвертируются. persons — дневная галерея: строки с
 вектором не той длины (например, из seed-скрипта) удаляются. employees —

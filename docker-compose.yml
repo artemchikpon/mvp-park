@@ -36,7 +36,10 @@ services:
   postgres:
     # Postgres 15 + расширение pgvector (векторы лиц, поиск похожих в базе).
     # Та же major-версия 15, что и раньше, — существующий том pgdata подходит.
-    image: pgvector/pgvector:0.8.0-pg15
+    # trixie — та же версия glibc (2.41), что у postgres:15: с bookworm (2.36)
+    # Postgres предупреждает о смене collation, и текстовые индексы могут
+    # разойтись с порядком сортировки.
+    image: pgvector/pgvector:0.8.1-pg15-trixie
     restart: unless-stopped
     environment:
       POSTGRES_USER: face
