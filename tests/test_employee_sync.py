@@ -1,12 +1,12 @@
 """
-Тесты для services/worker/employee_sync.py без сети: HR API и детектор лиц
+Тесты для services/worker/employees/sync.py без сети: HR API и детектор лиц
 подменяются через monkeypatch.
 """
 
 import numpy as np
 import pytest
 
-import employee_sync
+from employees import sync as employee_sync
 from db.models import Employee
 
 FRAME = np.zeros((2, 2, 3), dtype=np.uint8)

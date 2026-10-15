@@ -22,7 +22,7 @@ import redis
 import redis_conn
 from core.redis_keys import FRAMES_CONSUMER_GROUP, FRAMES_STREAM
 from core import perf
-from worker_config import (
+from config import (
     BLOCK_MS, CLAIM_IDLE_MS, CLAIM_INTERVAL_S, CONSUMER_NAME, OVERFLOW_IDLE_SLEEP_S,
     OVERFLOW_MIN_BACKLOG, WORKER_ROLE,
 )

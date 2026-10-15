@@ -5,6 +5,6 @@
 """
 
 from core.redis_utils import make_redis
-from worker_config import SOCK_TIMEOUT
+from config import SOCK_TIMEOUT
 
 r = make_redis(socket_timeout=SOCK_TIMEOUT, retry_on_timeout=True)

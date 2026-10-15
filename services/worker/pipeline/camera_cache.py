@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 from db.database import SessionLocal
 from db.models import Camera
-from worker_config import CAMERA_RELOAD_INTERVAL
+from config import CAMERA_RELOAD_INTERVAL
 
 log = logging.getLogger("worker")
 

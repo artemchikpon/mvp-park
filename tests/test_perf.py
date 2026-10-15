@@ -92,8 +92,8 @@ def test_reporter_disabled_with_zero_interval(monkeypatch):
 
 def test_worker_process_frame_records_stages(db_session, monkeypatch):
     import cv2
-    import camera_cache
-    import crossings
+    from pipeline import camera_cache
+    from pipeline import crossings
     from db.models import Camera
 
     cam = Camera(name="A", url="rtsp://a", direction="in")
@@ -121,7 +121,7 @@ def test_worker_process_frame_records_stages(db_session, monkeypatch):
 
 
 def test_queue_wait_parsed_from_stream_id(monkeypatch):
-    import crossings
+    from pipeline import crossings
     monkeypatch.setattr(crossings.time, "time", lambda: 1700000002.5)
     assert crossings._queue_wait_s(b"1700000000000-3") == pytest.approx(2.5)
     assert crossings._queue_wait_s(b"garbage") is None

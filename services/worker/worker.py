@@ -1,12 +1,11 @@
 """Точка входа worker-сервиса.
 
-Модули:
-  stream_consumer — чтение кадров из Redis Stream (consumer group)
-  crossings       — кадр -> лица -> идентификация -> событие пересечения
-  camera_cache    — кэш настроек камер
-  persons_reset   — ежедневная очистка галереи persons
-  employee_jobs   — задачи по сотрудникам от api
-  employee_sync   — синхронизация сотрудников с HR API
+Пакеты:
+  recognition/  — устройство (CPU/GPU), модель InsightFace, поиск по галерее
+  pipeline/     — чтение кадров из Redis Stream, кадр -> лица -> событие,
+                  кэш настроек камер
+  employees/    — синхронизация сотрудников с HR API, задачи от api
+  maintenance/  — ежедневная очистка галереи persons
 """
 
 import logging
@@ -17,13 +16,13 @@ import threading
 # прямо при импорте. Без настройки логирования эта INFO-строка терялась.
 logging.basicConfig(level=logging.INFO)
 
-import camera_cache  # noqa: E402
-import crossings  # noqa: E402
-import employee_jobs  # noqa: E402
-import employee_sync  # noqa: E402
-import persons_reset  # noqa: E402
-import stream_consumer  # noqa: E402
-import worker_config  # noqa: E402
+from pipeline import camera_cache  # noqa: E402
+from pipeline import crossings  # noqa: E402
+from employees import jobs as employee_jobs  # noqa: E402
+from employees import sync as employee_sync  # noqa: E402
+from maintenance import persons_reset  # noqa: E402
+from pipeline import stream_consumer  # noqa: E402
+import config as worker_config  # noqa: E402
 from core import perf  # noqa: E402
 from core.redis_utils import wait_for_redis  # noqa: E402
 from db.database import wait_for_db  # noqa: E402
@@ -43,7 +42,7 @@ def main() -> None:
     # face_engine загружает модель при импорте и определяет фактическое
     # устройство; подписываем им отчёты [perf ...], чтобы GPU- и CPU-воркеры
     # было видно отдельно.
-    from face_engine import ACTIVE_DEVICE
+    from recognition.face_engine import ACTIVE_DEVICE
 
     stats = perf.get("worker")
     stats.name = f"worker {ACTIVE_DEVICE} {worker_config.WORKER_ROLE}"

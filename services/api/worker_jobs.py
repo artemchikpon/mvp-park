@@ -1,7 +1,7 @@
 """RPC к воркеру через Redis для операций, которым нужен InsightFace.
 
 api кладёт JSON-задачу в список-очередь и ждёт ответ BLPOP-ом по ключу
-``<result_prefix>:<job_id>`` (протокол — см. services/worker/employee_jobs.py).
+``<result_prefix>:<job_id>`` (протокол — см. services/worker/employees/jobs.py).
 
 Функция не знает про HTTP: роуты сами переводят исключения в ответы.
 """

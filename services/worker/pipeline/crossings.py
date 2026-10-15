@@ -13,14 +13,14 @@ import cv2
 import numpy as np
 import redis
 
-import camera_cache
+from pipeline import camera_cache
 import redis_conn
 from core import perf
 from core.redis_keys import CROSSING_COOLDOWN_PREFIX
 from db.stats_service import log_crossing
-from face_engine import extract_faces
-from face_storage_pg import FaceStoragePG
-from worker_config import CROSSING_COOLDOWN_SECONDS
+from recognition.face_engine import extract_faces
+from recognition.face_storage import FaceStoragePG
+from config import CROSSING_COOLDOWN_SECONDS
 
 log = logging.getLogger("worker")
 

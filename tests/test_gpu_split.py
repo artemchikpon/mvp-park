@@ -1,18 +1,18 @@
 """
-Разделение GPU / CPU: выбор устройства (device.py) и роль overflow-воркера
+Разделение GPU / CPU: выбор устройства (recognition/device.py) и роль overflow-воркера
 (stream_consumer), который берёт кадры только когда очередь копится.
 """
 
 import fakeredis
 import pytest
 
-import device
+from recognition import device
 import redis_conn
-import stream_consumer
+from pipeline import stream_consumer
 from core.redis_keys import FRAMES_CONSUMER_GROUP, FRAMES_STREAM
 
 
-# ── device.py ────────────────────────────────────────────────────────────────
+# ── recognition/device.py ────────────────────────────────────────────────────────────────
 
 def test_cpu_device_uses_only_cpu_provider():
     assert device.providers_for("cpu") == [device.CPU]

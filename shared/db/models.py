@@ -12,7 +12,7 @@ _DIRECTION_CHECK = "direction in ('in','out')"
 
 # Размер вектора лица InsightFace (buffalo_sc, w600k_mbf). Векторы хранятся в
 # колонках pgvector `vector(512)`: поиск похожего лица идёт прямо в Postgres
-# (оператор <=>, косинусное расстояние), см. worker/face_storage_pg.py.
+# (оператор <=>, косинусное расстояние), см. worker/recognition/face_storage.py.
 EMBEDDING_DIM = 512
 
 

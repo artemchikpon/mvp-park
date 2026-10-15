@@ -18,7 +18,7 @@ for p in (
     sys.path.insert(0, str(p))
 
 # ── 2. Фейковый face_engine вместо реального insightface ───────────────────
-_fake_face_engine = types.ModuleType("face_engine")
+_fake_face_engine = types.ModuleType("recognition.face_engine")
 
 
 def _default_extract_faces(frame):
@@ -28,7 +28,7 @@ def _default_extract_faces(frame):
 
 
 _fake_face_engine.extract_faces = _default_extract_faces
-sys.modules.setdefault("face_engine", _fake_face_engine)
+sys.modules.setdefault("recognition.face_engine", _fake_face_engine)
 
 # ── 3. Тестовая БД: временный sqlite-файл (не in-memory — нужен общий файл
 #    между разными Session(), как это будет и в реальном Postgres). ────────

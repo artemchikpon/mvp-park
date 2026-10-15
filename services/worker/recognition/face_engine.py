@@ -1,6 +1,6 @@
 """Обёртка над InsightFace. Модель загружается при импорте модуля.
 
-Устройство задаётся FACE_DEVICE (cpu | gpu, см. device.py). Если GPU
+Устройство задаётся FACE_DEVICE (cpu | gpu, см. recognition/device.py). Если GPU
 запрошен, но недоступен, onnxruntime откатывается на CPU — это видно в
 логе строкой "InsightFace device: requested=gpu, active=cpu".
 """
@@ -9,8 +9,8 @@ import logging
 
 from insightface.app import FaceAnalysis
 
-import device
-from worker_config import FACE_CPU_THREADS, FACE_DEVICE
+from recognition import device
+from config import FACE_CPU_THREADS, FACE_DEVICE
 
 log = logging.getLogger("worker")
 

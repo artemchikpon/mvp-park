@@ -30,7 +30,7 @@ CROSSING_COOLDOWN_SECONDS = env_int("CROSSING_COOLDOWN_SECONDS", 60)
 CAMERA_RELOAD_INTERVAL = 30  # сек, как у producer
 
 # ── Устройство и роль воркера (разделение GPU / CPU) ────────────────────────
-# FACE_DEVICE: cpu | gpu — на чём считать модель InsightFace (см. device.py).
+# FACE_DEVICE: cpu | gpu — на чём считать модель InsightFace (см. recognition/device.py).
 FACE_DEVICE = env_str("FACE_DEVICE", "cpu").strip().lower()
 
 # WORKER_ROLE:

@@ -26,15 +26,21 @@
 | Модуль | Ответственность |
 |---|---|
 | `worker.py` | точка входа: ожидание БД/Redis, запуск фоновых потоков и чтения стрима |
-| `stream_consumer.py` | consumer group, XACK, XAUTOCLAIM зависших сообщений |
-| `crossings.py` | обработка кадра, cooldown повторного счёта (Redis), запись события |
-| `face_storage_pg.py` | поиск похожего лица (сотрудники / persons) запросом pgvector в Postgres |
-| `face_engine.py` | InsightFace (`buffalo_sc`), модель загружается при импорте |
-| `camera_cache.py` | кэш direction/gate камер |
-| `persons_reset.py` | ежедневная очистка галереи `persons` (Redis-лок между репликами) |
-| `employee_jobs.py` | задачи `sync`/`add` от api через Redis |
-| `employee_sync.py` | загрузка сотрудников и их фото из HR API |
-| `worker_config.py` | все настройки воркера из окружения |
+| `config.py` | все настройки воркера из окружения |
+| `redis_conn.py` | общее подключение к Redis |
+| **`recognition/`** | **распознавание лиц** |
+| `recognition/device.py` | выбор CPU / GPU для onnxruntime |
+| `recognition/face_engine.py` | InsightFace (`buffalo_sc`), модель загружается при импорте |
+| `recognition/face_storage.py` | поиск похожего лица (сотрудники / persons) запросом pgvector в Postgres |
+| **`pipeline/`** | **обработка кадров с камер** |
+| `pipeline/stream_consumer.py` | consumer group, XACK, XAUTOCLAIM зависших сообщений |
+| `pipeline/crossings.py` | обработка кадра, cooldown повторного счёта (Redis), запись события |
+| `pipeline/camera_cache.py` | кэш direction/gate камер |
+| **`employees/`** | **сотрудники из HR** |
+| `employees/sync.py` | загрузка сотрудников и их фото из HR API |
+| `employees/jobs.py` | задачи `sync`/`add` от api через Redis |
+| **`maintenance/`** | **обслуживание** |
+| `maintenance/persons_reset.py` | ежедневная очистка галереи `persons` (Redis-лок между репликами) |
 
 ### Общий код (`shared/`)
 
@@ -130,7 +136,7 @@ SELECT id, 1 - (embedding <=> :face) AS similarity   -- <=> косинусное
 FROM persons ORDER BY embedding <=> :face, id LIMIT 1;
 ```
 
-Совпадение — при сходстве `>= 0.65` (`SIMILARITY` в `face_storage_pg.py`).
+Совпадение — при сходстве `>= 0.65` (`SIMILARITY` в `recognition/face_storage.py`).
 Копии галереи в памяти воркеров нет: все реплики ищут по одной таблице, а
 «поиск + создание нового человека» идут под общим advisory lock, поэтому две
 реплики не заведут одного человека дважды.

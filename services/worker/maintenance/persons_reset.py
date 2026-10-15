@@ -20,7 +20,7 @@ from core.redis_keys import PERSONS_RESET_LOCK
 from core.timeutil import DEFAULT_PARK_TIMEZONE
 from db import stats_service
 from db.database import SessionLocal
-from worker_config import (
+from config import (
     CONSUMER_NAME, PERSONS_RESET_HOUR, PERSONS_RESET_LOCK_TTL, PERSONS_RESET_MINUTE,
 )
 

@@ -9,7 +9,7 @@ HR API:
 employees (INSERT или UPDATE по external_id). Сотрудники с file=0 (нет фото)
 пропускаются.
 
-Вызывается воркером при старте и по задачам из api (см. employee_jobs.py).
+Вызывается воркером при старте и по задачам из api (см. employees/jobs.py).
 """
 
 import logging
@@ -20,8 +20,8 @@ import numpy as np
 
 from db.database import SessionLocal
 from db.models import Employee
-from face_engine import extract_faces
-from worker_config import HR_API_BASE, HR_EMPLOYEES_PAGE_LIMIT, HR_SSL_VERIFY
+from recognition.face_engine import extract_faces
+from config import HR_API_BASE, HR_EMPLOYEES_PAGE_LIMIT, HR_SSL_VERIFY
 
 log = logging.getLogger("employee_sync")
 

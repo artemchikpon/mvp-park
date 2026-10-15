@@ -12,13 +12,13 @@ import time
 
 import redis
 
-import employee_sync
+from employees import sync as employee_sync
 import redis_conn
 from core.redis_keys import (
     EMPLOYEE_ADD_JOBS, EMPLOYEE_ADD_RESULT_PREFIX, EMPLOYEE_SYNC_JOBS,
     EMPLOYEE_SYNC_RESULT_PREFIX, result_key,
 )
-from worker_config import EMPLOYEE_JOB_RESULT_TTL, SOCK_TIMEOUT
+from config import EMPLOYEE_JOB_RESULT_TTL, SOCK_TIMEOUT
 
 log = logging.getLogger("worker")
 

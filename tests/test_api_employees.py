@@ -1,6 +1,6 @@
 """
 Тесты для services/api/routers/employees.py и RPC api -> worker
-(api/worker_jobs.py <-> worker/employee_jobs.py) поверх fakeredis.
+(api/worker_jobs.py <-> worker/employees/jobs.py) поверх fakeredis.
 """
 
 import numpy as np
@@ -10,7 +10,7 @@ import uuid
 import fakeredis
 import pytest
 
-import employee_jobs
+from employees import jobs as employee_jobs
 import redis_conn
 from api import worker_jobs
 from core.redis_keys import (
@@ -155,7 +155,7 @@ def test_worker_replies_with_error_and_accepts_legacy_plain_job_id(worker_redis,
 def test_poll_timeout_is_shorter_than_socket_timeout():
     """Иначе клиент обрывает BLPOP по таймауту сокета раньше, чем Redis
     ответит "задач нет" (TimeoutError на каждом пустом цикле)."""
-    import worker_config
+    import config as worker_config
     assert employee_jobs.POLL_TIMEOUT_S < worker_config.SOCK_TIMEOUT
 
 

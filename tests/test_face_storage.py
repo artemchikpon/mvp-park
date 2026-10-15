@@ -1,12 +1,12 @@
 """
-Тесты для services/worker/face_storage_pg.py — сопоставление лиц с базой
+Тесты для services/worker/recognition/face_storage.py — сопоставление лиц с базой
 (cosine similarity, поиск в БД через pgvector; в SQLite-тестах — numpy), фильтрация сотрудников.
 """
 
 import numpy as np
 import pytest
 
-from face_storage_pg import FaceStoragePG
+from recognition.face_storage import FaceStoragePG
 from db.models import Person, Employee
 
 
@@ -124,12 +124,12 @@ def test_identify_prefers_best_matching_person_when_multiple_close(db_session, s
 # ── nearest: поиск самого похожего ───────────────────────────────────────────
 
 def test_nearest_returns_none_for_empty_table(db_session):
-    from face_storage_pg import nearest
+    from recognition.face_storage import nearest
     assert nearest(db_session, Person, _vec(1)) is None
 
 
 def test_nearest_returns_id_and_cosine_similarity(db_session):
-    from face_storage_pg import nearest
+    from recognition.face_storage import nearest
     a, b = _vec(1), _vec(2)
     pa, pb = Person(embedding=a, age=1, gender=1), Person(embedding=b, age=1, gender=1)
     db_session.add_all([pa, pb])
@@ -141,7 +141,7 @@ def test_nearest_returns_id_and_cosine_similarity(db_session):
 
 
 def test_nearest_prefers_lower_id_on_equal_similarity(db_session):
-    from face_storage_pg import nearest
+    from recognition.face_storage import nearest
     v = _vec(5)
     first, second = Person(embedding=v, age=1, gender=1), Person(embedding=v, age=1, gender=1)
     db_session.add_all([first, second])

@@ -16,11 +16,11 @@ import fakeredis
 import numpy as np
 import pytest
 
-import camera_cache
-import crossings
-import persons_reset
+from pipeline import camera_cache
+from pipeline import crossings
+from maintenance import persons_reset
 import redis_conn
-import worker_config
+import config as worker_config
 from db.models import Camera, Person
 from db import stats_service as svc
 
@@ -158,7 +158,7 @@ def test_process_entry_records_crossing_for_new_visitor(db_session, monkeypatch)
 
 def test_process_entry_skips_faces_identified_as_employee(db_session, monkeypatch):
     """identify() возвращает None для лиц сотрудников — событие не должно
-    записываться (см. face_storage_pg.py: 'None означает сотрудник')."""
+    записываться (см. recognition/face_storage.py: 'None означает сотрудник')."""
     cam = Camera(name="A", url="rtsp://a", direction="in")
     db_session.add(cam)
     db_session.commit()
