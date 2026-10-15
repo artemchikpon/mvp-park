@@ -20,9 +20,7 @@ import numpy as np
 
 from db.database import SessionLocal
 from db.models import Employee
-from embeddings import to_bytes
 from face_engine import extract_faces
-from face_storage_pg import FaceStoragePG
 from worker_config import HR_API_BASE, HR_EMPLOYEES_PAGE_LIMIT, HR_SSL_VERIFY
 
 log = logging.getLogger("employee_sync")
@@ -134,7 +132,7 @@ def _find_by_external_id(session, external_id: int | None) -> Employee | None:
 def _apply(emp: Employee, first_name: str, file_id: int, embedding: np.ndarray) -> None:
     emp.first_name = first_name
     emp.file_id = file_id
-    emp.embedding = to_bytes(embedding)
+    emp.embedding = np.asarray(embedding, dtype=np.float32)
 
 
 def _employee_to_dict(emp: Employee) -> dict:
@@ -190,7 +188,6 @@ def add_employee_from_file(first_name: str, file_id: int, external_id: int | Non
     """Создаёт/обновляет одного сотрудника по фото из HR API (задача из api)."""
     embedding = _embedding_from_photo(file_id)
     result, _ = _save_employee(external_id, first_name, file_id, embedding)
-    FaceStoragePG.invalidate_cache()
     return result
 
 
@@ -252,6 +249,5 @@ def sync_employees() -> dict:
             counts["updated"] += 1
             log.info(f"[employee_sync] Гонка INSERT разрешена UPDATE: {first_name} (external_id={ext_id})")
 
-    FaceStoragePG.invalidate_cache()
     log.info(f"[employee_sync] Завершено: {counts}")
     return counts

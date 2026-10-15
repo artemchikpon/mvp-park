@@ -20,7 +20,6 @@ from core.redis_keys import PERSONS_RESET_LOCK
 from core.timeutil import DEFAULT_PARK_TIMEZONE
 from db import stats_service
 from db.database import SessionLocal
-from face_storage_pg import FaceStoragePG
 from worker_config import (
     CONSUMER_NAME, PERSONS_RESET_HOUR, PERSONS_RESET_LOCK_TTL, PERSONS_RESET_MINUTE,
 )
@@ -68,10 +67,6 @@ def run_once() -> None:
     session = SessionLocal()
     try:
         deleted = stats_service.reset_persons(session)
-        # In-memory кэш векторов ещё до CACHE_TTL_SECONDS мог бы отдавать
-        # удалённые записи — инвалидируем сразу, чтобы новые лица не
-        # "склеивались" со старыми.
-        FaceStoragePG.invalidate_cache()
         log.info(
             f"[persons_reset] Таблица persons очищена: удалено {deleted} записей "
             f"(плановый сброс {PERSONS_RESET_HOUR:02d}:{PERSONS_RESET_MINUTE:02d} "

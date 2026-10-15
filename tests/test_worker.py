@@ -207,8 +207,8 @@ def test_seconds_until_next_reset_is_within_24h_and_positive(db_session):
 
 def test_run_persons_reset_once_clears_persons_table(db_session):
     svc.get_settings(db_session)
-    db_session.add(Person(embedding=b"\x00" * 8, age=30, gender=1))
-    db_session.add(Person(embedding=b"\x01" * 8, age=25, gender=0))
+    db_session.add(Person(embedding=np.full(512, 0, np.float32), age=30, gender=1))
+    db_session.add(Person(embedding=np.full(512, 1, np.float32), age=25, gender=0))
     db_session.commit()
     assert db_session.query(Person).count() == 2
 
@@ -221,11 +221,11 @@ def test_run_persons_reset_once_is_a_noop_for_second_replica_same_day(db_session
     """Вторая реплика воркера, проснувшаяся в ту же минуту, не должна ничего
     удалять повторно — лок в Redis уже занят первой репликой."""
     svc.get_settings(db_session)
-    db_session.add(Person(embedding=b"\x00" * 8, age=30, gender=1))
+    db_session.add(Person(embedding=np.full(512, 0, np.float32), age=30, gender=1))
     db_session.commit()
 
     persons_reset.run_once()  # "первая реплика" — реально чистит
-    db_session.add(Person(embedding=b"\x02" * 8, age=40, gender=1))
+    db_session.add(Person(embedding=np.full(512, 2, np.float32), age=40, gender=1))
     db_session.commit()
 
     persons_reset.run_once()  # "вторая реплика" — лок уже занят

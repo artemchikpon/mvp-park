@@ -54,11 +54,11 @@ def test_sync_counts_added_skipped_and_errors(db_session, hr):
     assert result == {"added": 1, "updated": 0, "skipped": 3, "errors": 1}
     [emp] = db_session.query(Employee).all()
     assert (emp.external_id, emp.first_name, emp.file_id) == (1, "Анна", 10)
-    assert np.allclose(np.frombuffer(emp.embedding, np.float32), _emb(1))
+    assert np.allclose(np.asarray(emp.embedding), _emb(1))
 
 
 def test_sync_updates_existing_employee_by_external_id(db_session, hr):
-    db_session.add(Employee(external_id=1, first_name="Old", file_id=1, embedding=b"\x00" * 8))
+    db_session.add(Employee(external_id=1, first_name="Old", file_id=1, embedding=np.full(512, 0, np.float32)))
     db_session.commit()
     hr["employees"] = [{"id": 1, "firstname": "Анна", "file": 10}]
     hr["photos"] = {10: [_Face(_emb(1))]}
@@ -107,7 +107,7 @@ def test_add_employee_errors_keep_messages_api_relies_on(db_session, hr, photo, 
 def test_sync_resolves_insert_race_as_update(db_session, hr, monkeypatch, caplog):
     """Две реплики одновременно не нашли external_id; вторая получает ошибку
     уникальности на INSERT и должна сделать UPDATE (counts: updated)."""
-    db_session.add(Employee(external_id=1, first_name="Old", file_id=1, embedding=b"\x00" * 8))
+    db_session.add(Employee(external_id=1, first_name="Old", file_id=1, embedding=np.full(512, 0, np.float32)))
     db_session.commit()
     hr["employees"] = [{"id": 1, "firstname": "Анна", "file": 10}]
     hr["photos"] = {10: [_Face(_emb(1))]}

@@ -3,6 +3,7 @@
 (api/worker_jobs.py <-> worker/employee_jobs.py) поверх fakeredis.
 """
 
+import numpy as np
 import json
 import uuid
 
@@ -39,7 +40,7 @@ def _prepare_worker_reply(client, prefix: str, reply: dict) -> None:
 # ── list / delete ────────────────────────────────────────────────────────────
 
 def test_list_employees_hides_embeddings(api_client, auth_header, db_session):
-    db_session.add(Employee(first_name="Иван", external_id=7, file_id=3, embedding=b"\x00" * 8))
+    db_session.add(Employee(first_name="Иван", external_id=7, file_id=3, embedding=np.full(512, 0, np.float32)))
     db_session.commit()
 
     resp = api_client.get("/employees/", headers=auth_header)
@@ -50,7 +51,7 @@ def test_list_employees_hides_embeddings(api_client, auth_header, db_session):
 
 
 def test_delete_employee(api_client, auth_header, db_session):
-    emp = Employee(first_name="Иван", embedding=b"\x00" * 8)
+    emp = Employee(first_name="Иван", embedding=np.full(512, 0, np.float32))
     db_session.add(emp)
     db_session.commit()
 

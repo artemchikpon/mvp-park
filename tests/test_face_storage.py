@@ -1,6 +1,6 @@
 """
 Тесты для services/worker/face_storage_pg.py — сопоставление лиц с базой
-(cosine similarity), фильтрация сотрудников, скользящее среднее эмбеддинга.
+(cosine similarity, поиск в БД через pgvector; в SQLite-тестах — numpy), фильтрация сотрудников.
 """
 
 import numpy as np
@@ -41,7 +41,7 @@ def test_is_employee_false_when_no_employees_at_all(db_session, storage):
 
 def test_is_employee_true_for_matching_embedding(db_session, storage):
     emb = _vec(1)
-    db_session.add(Employee(first_name="Иван", embedding=emb.tobytes()))
+    db_session.add(Employee(first_name="Иван", embedding=emb))
     db_session.commit()
 
     # То же самое лицо (небольшой шум, как при повторной съёмке) должно опознаться
@@ -50,7 +50,7 @@ def test_is_employee_true_for_matching_embedding(db_session, storage):
 
 
 def test_is_employee_false_for_clearly_different_face(db_session, storage):
-    db_session.add(Employee(first_name="Иван", embedding=_vec(1).tobytes()))
+    db_session.add(Employee(first_name="Иван", embedding=_vec(1)))
     db_session.commit()
 
     different = _vec(999)
@@ -70,7 +70,7 @@ def test_identify_creates_new_person_on_first_sighting(db_session, storage):
 
 def test_identify_matches_existing_person_by_similarity(db_session, storage):
     emb = _vec(1)
-    person = Person(embedding=emb.tobytes(), age=25, gender=1)
+    person = Person(embedding=emb, age=25, gender=1)
     db_session.add(person)
     db_session.commit()
 
@@ -84,7 +84,7 @@ def test_identify_matches_existing_person_by_similarity(db_session, storage):
 
 
 def test_identify_creates_separate_person_for_different_face(db_session, storage):
-    db_session.add(Person(embedding=_vec(1).tobytes(), age=25, gender=1))
+    db_session.add(Person(embedding=_vec(1), age=25, gender=1))
     db_session.commit()
 
     result = storage.identify(_vec(999), _Face(age=40, gender=0))
@@ -95,7 +95,7 @@ def test_identify_creates_separate_person_for_different_face(db_session, storage
 
 def test_identify_returns_none_for_employee_face(db_session, storage):
     emb = _vec(1)
-    db_session.add(Employee(first_name="Иван", embedding=emb.tobytes()))
+    db_session.add(Employee(first_name="Иван", embedding=emb))
     db_session.commit()
 
     result = storage.identify(emb, _Face(age=30, gender=1))
@@ -112,10 +112,38 @@ def test_identify_prefers_best_matching_person_when_multiple_close(db_session, s
     close_match = base + np.random.RandomState(10).normal(0, 0.001, size=base.shape).astype(np.float32)
     far_match = base + np.random.RandomState(20).normal(0, 0.2, size=base.shape).astype(np.float32)
 
-    p_close = Person(embedding=close_match.tobytes(), age=20, gender=1)
-    p_far = Person(embedding=far_match.tobytes(), age=20, gender=1)
+    p_close = Person(embedding=close_match, age=20, gender=1)
+    p_far = Person(embedding=far_match, age=20, gender=1)
     db_session.add_all([p_far, p_close])  # добавлены в порядке "далёкий раньше близкого"
     db_session.commit()
 
     result = storage.identify(base, _Face(age=20, gender=1))
     assert result["id"] == p_close.id
+
+
+# ── nearest: поиск самого похожего ───────────────────────────────────────────
+
+def test_nearest_returns_none_for_empty_table(db_session):
+    from face_storage_pg import nearest
+    assert nearest(db_session, Person, _vec(1)) is None
+
+
+def test_nearest_returns_id_and_cosine_similarity(db_session):
+    from face_storage_pg import nearest
+    a, b = _vec(1), _vec(2)
+    pa, pb = Person(embedding=a, age=1, gender=1), Person(embedding=b, age=1, gender=1)
+    db_session.add_all([pa, pb])
+    db_session.commit()
+
+    found_id, similarity = nearest(db_session, Person, a * 3.0)   # масштаб не влияет на косинус
+    assert found_id == pa.id
+    assert similarity == pytest.approx(1.0, abs=1e-5)
+
+
+def test_nearest_prefers_lower_id_on_equal_similarity(db_session):
+    from face_storage_pg import nearest
+    v = _vec(5)
+    first, second = Person(embedding=v, age=1, gender=1), Person(embedding=v, age=1, gender=1)
+    db_session.add_all([first, second])
+    db_session.commit()
+    assert nearest(db_session, Person, v)[0] == min(first.id, second.id)

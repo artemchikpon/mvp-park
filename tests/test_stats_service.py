@@ -4,6 +4,7 @@
 часть проекта: чистые вычисления над БД, без сети/камер/ML.
 """
 
+import numpy as np
 from datetime import date, datetime, timedelta
 
 from core.timeutil import utcnow
@@ -372,7 +373,7 @@ def test_record_crossing_keeps_valid_zero_age_and_gender(db_session):
 
 # ── reset_persons (ежедневный сброс галереи лиц) ────────────────────────────
 
-def _make_person(db_session, embedding=b"\x00" * 8):
+def _make_person(db_session, embedding=np.full(512, 0, np.float32)):
     p = Person(embedding=embedding, age=30, gender=1)
     db_session.add(p)
     db_session.commit()

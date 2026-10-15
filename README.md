@@ -28,8 +28,7 @@
 | `worker.py` | точка входа: ожидание БД/Redis, запуск фоновых потоков и чтения стрима |
 | `stream_consumer.py` | consumer group, XACK, XAUTOCLAIM зависших сообщений |
 | `crossings.py` | обработка кадра, cooldown повторного счёта (Redis), запись события |
-| `face_storage_pg.py` | сопоставление embedding'ов (сотрудники / persons), кэш в памяти |
-| `embeddings.py` | сериализация векторов в bytes и обратно |
+| `face_storage_pg.py` | поиск похожего лица (сотрудники / persons) запросом pgvector в Postgres |
 | `face_engine.py` | InsightFace (`buffalo_sc`), модель загружается при импорте |
 | `camera_cache.py` | кэш direction/gate камер |
 | `persons_reset.py` | ежедневная очистка галереи `persons` (Redis-лок между репликами) |
@@ -119,6 +118,31 @@ cd shared && DATABASE_URL=postgresql://face:face@localhost:5432/face_db \
   PYTHONPATH=. alembic revision --autogenerate -m "описание"
 ```
 
+## Векторы лиц и pgvector
+
+Векторы лиц (`persons.embedding`, `employees.embedding`) хранятся в колонках
+`vector(512)` расширения [pgvector](https://github.com/pgvector/pgvector);
+Postgres в compose — образ `pgvector/pgvector:0.8.0-pg15`. Самое похожее лицо
+ищется прямо в базе:
+
+```sql
+SELECT id, 1 - (embedding <=> :face) AS similarity   -- <=> косинусное расстояние
+FROM persons ORDER BY embedding <=> :face, id LIMIT 1;
+```
+
+Совпадение — при сходстве `>= 0.65` (`SIMILARITY` в `face_storage_pg.py`).
+Копии галереи в памяти воркеров нет: все реплики ищут по одной таблице, а
+«поиск + создание нового человека» идут под общим advisory lock, поэтому две
+реплики не заведут одного человека дважды.
+
+Поиск точный (перебор всех строк). Для дневной галереи на тысячи человек это
+миллисекунды; если она вырастет до сотен тысяч, можно добавить
+приблизительный индекс (результат может изредка отличаться от точного):
+
+```sql
+CREATE INDEX ON persons USING hnsw (embedding vector_cosine_ops);
+```
+
 ## Замеры производительности
 
 Worker и producer раз в `PERF_LOG_INTERVAL` секунд пишут строку `[perf ...]`:
@@ -129,10 +153,10 @@ docker compose logs -f worker producer | grep perf
 
 - `CPU N cores` — сколько ядер в среднем занимал процесс за интервал;
 - worker: `frames`, `faces`, `crossings`, `new_persons` (в секунду); время шагов
-  `model` (InsightFace), `match` (сравнение с галереей), `gallery_reload`
-  (перечитывание галереи из БД), `db_person`, `db_event`, `decode`,
-  `redis_cooldown` и их доля; `queue_wait` — сколько кадр ждал в очереди
-  (растёт, если воркеры не успевают); `gallery_persons` — размер галереи;
+  `model` (InsightFace), `match` (поиск похожего лица в Postgres),
+  `db_person`, `db_event`, `decode`, `redis_cooldown` и их доля;
+  `queue_wait` — сколько кадр ждал в очереди (растёт, если воркеры не
+  успевают);
 - producer: по каждой камере `grabbed` (прочитано из потока) и `sent`
   (отправлено в Redis) в секунду, время `retrieve`, `jpeg`, `xadd`.
 

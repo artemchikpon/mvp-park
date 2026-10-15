@@ -1,13 +1,19 @@
 from sqlalchemy import (
     Boolean, CheckConstraint, Column, DateTime, ForeignKey, Index, Integer,
-    LargeBinary, String, Text, true,
+    String, Text, true,
 )
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.orm import relationship
 
 from core.timeutil import DEFAULT_PARK_TIMEZONE, utcnow
 from db.database import Base
 
 _DIRECTION_CHECK = "direction in ('in','out')"
+
+# Размер вектора лица InsightFace (buffalo_sc, w600k_mbf). Векторы хранятся в
+# колонках pgvector `vector(512)`: поиск похожего лица идёт прямо в Postgres
+# (оператор <=>, косинусное расстояние), см. worker/face_storage_pg.py.
+EMBEDDING_DIM = 512
 
 
 class Camera(Base):
@@ -31,7 +37,7 @@ class Person(Base):
     __tablename__ = "persons"
 
     id = Column(Integer, primary_key=True)
-    embedding = Column(LargeBinary, nullable=False)     # float32-вектор (bytes)
+    embedding = Column(Vector(EMBEDDING_DIM), nullable=False)
     age = Column(Integer)
     gender = Column(Integer)                            # 1=male, 0=female
     first_seen = Column(DateTime, default=utcnow)
@@ -71,7 +77,7 @@ class Employee(Base):
     external_id = Column(Integer, nullable=True, unique=True)   # id в HR
     first_name = Column(String(128), nullable=False)
     file_id = Column(Integer, nullable=True)
-    embedding = Column(LargeBinary, nullable=False)
+    embedding = Column(Vector(EMBEDDING_DIM), nullable=False)
     created_at = Column(DateTime, default=utcnow)
 
     __table_args__ = (

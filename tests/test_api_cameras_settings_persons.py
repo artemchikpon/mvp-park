@@ -5,6 +5,7 @@ face_engine), см. test_api_employees.py.
 """
 
 
+import numpy as np
 from db.models import Person
 
 
@@ -153,7 +154,7 @@ def test_list_persons_empty_by_default(api_client, auth_header):
 
 def test_count_persons_matches_db(api_client, auth_header, db_session):
     for i in range(3):
-        db_session.add(Person(embedding=b"\x00" * 2048, age=20 + i, gender=i % 2))
+        db_session.add(Person(embedding=np.full(512, 0, np.float32), age=20 + i, gender=i % 2))
     db_session.commit()
 
     resp = api_client.get("/persons/count", headers=auth_header)
@@ -162,7 +163,7 @@ def test_count_persons_matches_db(api_client, auth_header, db_session):
 
 def test_list_persons_respects_limit_and_offset(api_client, auth_header, db_session):
     for i in range(5):
-        db_session.add(Person(embedding=b"\x00" * 2048, age=i))
+        db_session.add(Person(embedding=np.full(512, 0, np.float32), age=i))
     db_session.commit()
 
     resp = api_client.get("/persons/", headers=auth_header, params={"limit": 2, "offset": 1})
@@ -178,7 +179,7 @@ def test_list_persons_limit_out_of_range_is_rejected(api_client, auth_header):
 
 def test_reset_persons_clears_table_and_returns_deleted_count(api_client, auth_header, db_session):
     for i in range(3):
-        db_session.add(Person(embedding=b"\x00" * 2048, age=20 + i, gender=i % 2))
+        db_session.add(Person(embedding=np.full(512, 0, np.float32), age=20 + i, gender=i % 2))
     db_session.commit()
 
     resp = api_client.post("/persons/reset", headers=auth_header)
@@ -196,7 +197,7 @@ def test_reset_persons_nulls_person_id_on_crossing_events(api_client, auth_heade
     db_session.add(cam)
     db_session.commit()
 
-    person = Person(embedding=b"\x00" * 2048, age=20, gender=1)
+    person = Person(embedding=np.full(512, 0, np.float32), age=20, gender=1)
     db_session.add(person)
     db_session.commit()
     db_session.refresh(person)

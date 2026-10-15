@@ -15,7 +15,6 @@
 
 import os
 import random
-import struct
 import sys
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
@@ -30,7 +29,7 @@ from sqlalchemy import text  # noqa: E402
 
 from core.timeutil import DEFAULT_PARK_TIMEZONE, utcnow  # noqa: E402
 from db.database import SessionLocal  # noqa: E402
-from db.models import Camera, CrossingEvent, ParkSettings, Person  # noqa: E402
+from db.models import EMBEDDING_DIM, Camera, CrossingEvent, ParkSettings, Person  # noqa: E402
 
 
 # Часы посещений ниже — местное время парка; в БД события пишутся в UTC
@@ -40,9 +39,9 @@ PARK_TZ = ZoneInfo(DEFAULT_PARK_TIMEZONE)
 
 # ── Вспомогательные функции ────────────────────────────────────────────────────
 
-def fake_embedding(dim: int = 128) -> bytes:
-    """Случайный float32-вектор как bytes."""
-    return struct.pack(f"{dim}f", *[random.gauss(0, 1) for _ in range(dim)])
+def fake_embedding(dim: int = EMBEDDING_DIM) -> list[float]:
+    """Случайный вектор лица (колонка pgvector vector(512))."""
+    return [random.gauss(0, 1) for _ in range(dim)]
 
 
 def hourly_weight(hour: int) -> float:
@@ -158,7 +157,7 @@ def seed():
                 gender = random.choice([0, 1])
                 first = base_dt + timedelta(days=random.randint(0, 59))
                 p = Person(
-                    embedding=fake_embedding(128),
+                    embedding=fake_embedding(),
                     age=age,
                     gender=gender,
                     first_seen=first,
