@@ -2,3 +2,4 @@ redis
 opencv-python-headless
 SQLAlchemy>=2.0,<2.1  # 2.1 по умолчанию ведёт postgresql:// на psycopg3, а в образах psycopg2
 psycopg2-binary
+pgvector>=0.3  # тип vector(512) в db/models.py (общие модели)
