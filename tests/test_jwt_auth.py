@@ -198,3 +198,10 @@ def test_no_initial_admin_without_env(db_session, monkeypatch):
     monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
     ensure_initial_admin()
     assert db_session.query(User).count() == 0
+
+
+def test_token_lifetimes_one_day_and_fourteen_days():
+    access = jwt.decode(security.create_access_token(1), security.JWT_SECRET, algorithms=["HS256"])
+    refresh = jwt.decode(security.create_refresh_token(1), security.JWT_SECRET, algorithms=["HS256"])
+    assert access["exp"] - access["iat"] == 24 * 3600
+    assert refresh["exp"] - refresh["iat"] == 14 * 24 * 3600

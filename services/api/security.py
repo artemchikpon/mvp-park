@@ -4,8 +4,8 @@
 хранится строка "scrypt$n$r$p$соль$хэш". Сравнение — постоянное по времени.
 
 Токены — JWT (HS256), подписаны JWT_SECRET:
-  - access  (ACCESS_TOKEN_MINUTES, по умолчанию 30 мин) — для запросов к API;
-  - refresh (REFRESH_TOKEN_DAYS, по умолчанию 7 дней) — только для
+  - access  (ACCESS_TOKEN_MINUTES, по умолчанию 1440 мин = 1 день) — для запросов к API;
+  - refresh (REFRESH_TOKEN_DAYS, по умолчанию 14 дней) — только для
     POST /auth/refresh, чтобы получить новую пару без ввода пароля.
 В токене лежит id пользователя (sub) и тип; роль и активность при каждом
 запросе берутся из БД, поэтому отключение пользователя или смена роли
@@ -24,8 +24,8 @@ from core.env import env_int, env_str
 
 JWT_SECRET = env_str("JWT_SECRET", "")
 JWT_ALGORITHM = "HS256"
-ACCESS_TOKEN_MINUTES = env_int("ACCESS_TOKEN_MINUTES", 30)
-REFRESH_TOKEN_DAYS = env_int("REFRESH_TOKEN_DAYS", 7)
+ACCESS_TOKEN_MINUTES = env_int("ACCESS_TOKEN_MINUTES", 24 * 60)  # 1 день
+REFRESH_TOKEN_DAYS = env_int("REFRESH_TOKEN_DAYS", 14)
 
 ACCESS, REFRESH = "access", "refresh"
 

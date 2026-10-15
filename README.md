@@ -57,7 +57,7 @@ docker compose up -d --build
 ## Авторизация
 
 - **JWT — для администрации.** `POST /auth/login` (логин/пароль, форма OAuth2)
-  возвращает `access_token` (30 мин) и `refresh_token` (7 дней). Запросы — с
+  возвращает `access_token` (1 день) и `refresh_token` (14 дней). Запросы — с
   заголовком `Authorization: Bearer <access_token>`; новая пара без пароля —
   `POST /auth/refresh`. Кто я — `GET /auth/me`.
 - **Роли:** `admin` — всё; `viewer` — только чтение (GET), изменения → `403`.
@@ -86,7 +86,7 @@ DATABASE_URL=postgresql://face:face@localhost:5432/face_db python scripts/seed_d
 | `DATABASE_URL` | все | `postgresql://face:face@postgres:5432/face_db` | подключение к Postgres |
 | `REDIS_HOST` / `REDIS_PORT` | api, worker, producer | `redis` / `6379` | Redis |
 | `JWT_SECRET` | api | — (обязательно, ≥ 32 символов) | подпись JWT-токенов |
-| `ACCESS_TOKEN_MINUTES` / `REFRESH_TOKEN_DAYS` | api | `30` / `7` | срок жизни токенов |
+| `ACCESS_TOKEN_MINUTES` / `REFRESH_TOKEN_DAYS` | api | `1440` / `14` | срок жизни токенов (1 день / 14 дней) |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | api | — | первый admin, пока таблица `users` пуста |
 | `CORS_ORIGINS` | api | `*` | разрешённые origin'ы дашборда |
 | `ENABLE_DOCS` | api | `false` | `/docs`, `/redoc`, `/openapi.json` |
