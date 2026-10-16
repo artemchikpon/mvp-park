@@ -1,26 +1,6 @@
-version: "3.9"
-
-# Общие настройки, переиспользуемые сервисами через YAML-якоря.
-x-db-env: &db-env
-  DATABASE_URL: postgresql://face:face@postgres:5432/face_db
-
-x-app-env: &app-env
-  <<: *db-env
-  REDIS_HOST: redis
-  # Сводка производительности в логах раз в N секунд (0 — выключить)
-  PERF_LOG_INTERVAL: "${PERF_LOG_INTERVAL:-30}"
-
-x-hr-env: &hr-env
-  HR_API_BASE: "https://central-park.rzbtech.uz"
-  HR_SSL_VERIFY: "true"
-
-x-app-depends: &app-depends
-  postgres:
-    condition: service_healthy
-  redis:
-    condition: service_healthy
-  migrator:
-    condition: service_completed_successfully
+# Все адреса, пароли и секреты — в файле .env (шаблон: .env.example).
+# Остальные настройки имеют значения по умолчанию в коде (таблица в README);
+# чтобы поменять какую-то из них — допишите её в .env.
 
 services:
 
@@ -34,21 +14,15 @@ services:
       retries: 10
 
   postgres:
-    # Postgres 15 + расширение pgvector (векторы лиц, поиск похожих в базе).
-    # Та же major-версия 15, что и раньше, — существующий том pgdata подходит.
-    # trixie — та же версия glibc (2.41), что у postgres:15: с bookworm (2.36)
-    # Postgres предупреждает о смене collation, и текстовые индексы могут
-    # разойтись с порядком сортировки.
+    # Postgres 15 + pgvector (поиск похожих лиц в базе).
+    # trixie — та же glibc, что у postgres:15, поэтому старый том pgdata подходит.
     image: pgvector/pgvector:0.8.1-pg15-trixie
     restart: unless-stopped
-    environment:
-      POSTGRES_USER: face
-      POSTGRES_PASSWORD: face
-      POSTGRES_DB: face_db
+    env_file: .env
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U face -d face_db" ]
+      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}" ]
       interval: 5s
       timeout: 3s
       retries: 15
@@ -58,8 +32,7 @@ services:
     build:
       context: .
       dockerfile: shared/Dockerfile
-    environment:
-      <<: *db-env
+    env_file: .env
     depends_on:
       postgres:
         condition: service_healthy
@@ -71,48 +44,46 @@ services:
       dockerfile: services/api/Dockerfile
     ports:
       - "8000:8000"
-    environment:
-      <<: [*app-env, *hr-env]
-      ENABLE_DOCS: "true"
-      # CORS_ORIGINS можно передать через .env, например:
-      # https://dashboard.example.com,https://admin.example.com
-      CORS_ORIGINS: "${CORS_ORIGINS:-*}"
-      # ВАЖНО: реальные секреты — только в .env / docker secret, не в git.
-      # Подпись JWT-токенов (обязательно, >= 32 символов): openssl rand -hex 32
-      JWT_SECRET: "${JWT_SECRET:?Задайте JWT_SECRET в .env — см. security.py}"
-      ACCESS_TOKEN_MINUTES: "${ACCESS_TOKEN_MINUTES:-1440}"  # 1 день
-      REFRESH_TOKEN_DAYS: "${REFRESH_TOKEN_DAYS:-14}"
-      # Первый admin создаётся, только пока таблица users пуста.
-      ADMIN_USERNAME: "${ADMIN_USERNAME:-}"
-      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-}"
+    env_file: .env
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    depends_on: *app-depends
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   producer:
     build:
       context: .
       dockerfile: services/producer/Dockerfile
-    environment:
-      <<: *app-env
-      # Не больше N кадров в секунду с каждой камеры в Redis (0 — без ограничения)
-      PRODUCER_MAX_FPS: "${PRODUCER_MAX_FPS:-5}"
-    depends_on: *app-depends
+    env_file: .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   worker:
     build:
       context: .
       dockerfile: services/worker/Dockerfile
-    environment:
-      <<: [*app-env, *hr-env]
-      CROSSING_COOLDOWN_SECONDS: "60"
-      PERSONS_RESET_HOUR: "0"
-      PERSONS_RESET_MINUTE: "0"
+    env_file: .env
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    depends_on: *app-depends
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
     restart: unless-stopped
     deploy:
       replicas: 2

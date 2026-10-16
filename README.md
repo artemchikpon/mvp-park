@@ -52,13 +52,18 @@
 
 ## Запуск
 
+Все адреса (`DATABASE_URL`, `HR_API_BASE`, `CORS_ORIGINS`), пароли и секреты
+лежат в `.env`; в git — только шаблон `.env.example`.
+
 ```bash
-echo "JWT_SECRET=$(openssl rand -hex 32)" > .env
-echo "ADMIN_USERNAME=admin" >> .env
-echo "ADMIN_PASSWORD=смените-этот-пароль" >> .env
+cp .env.example .env        # PowerShell: Copy-Item .env.example .env
+# в .env заполнить JWT_SECRET (openssl rand -hex 32) и ADMIN_PASSWORD
 docker compose up -d --build
-# Swagger: http://localhost:8000/docs (ENABLE_DOCS=true в compose)
+# Swagger: http://localhost:8000/docs (ENABLE_DOCS=true в .env)
 ```
+
+Остальные переменные из таблицы ниже необязательны: значения по умолчанию
+заданы в коде, поменять — дописать строку в `.env`.
 
 ## Авторизация
 
